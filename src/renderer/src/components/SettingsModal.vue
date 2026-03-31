@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref } from 'vue'
 import type { Account } from '../types'
 import { getInitials } from '../utils'
 
@@ -25,6 +25,8 @@ const emit = defineEmits<{
 
 const needsRestart = ref(false)
 const newStoragePath = ref('')
+const isMigrating = ref(false)
+const migrationError = ref('')
 
 const handleAvatarUpload = (event: Event, id: string) => {
   const input = event.target as HTMLInputElement
@@ -40,10 +42,20 @@ const handleAvatarUpload = (event: Event, id: string) => {
 }
 
 const handleChangeStorage = async () => {
-  const result = await window.api.selectStorageFolder()
-  if (result) {
-    newStoragePath.value = result
-    needsRestart.value = true
+  isMigrating.value = true
+  migrationError.value = ''
+  try {
+    const result = await window.api.selectStorageFolder()
+    if (result.success && result.newPath) {
+      newStoragePath.value = result.newPath
+      needsRestart.value = true
+    } else if (result.error && result.error !== 'cancelled') {
+      migrationError.value = result.error
+    }
+  } catch (e) {
+    migrationError.value = String(e)
+  } finally {
+    isMigrating.value = false
   }
 }
 
@@ -174,23 +186,44 @@ const activeSection = ref<'accounts' | 'system'>('accounts')
               </div>
               <button
                 @click="handleChangeStorage"
-                class="px-4 py-2.5 bg-white border border-gray-300 rounded-lg text-sm font-semibold text-gray-700 hover:bg-gray-50 hover:border-zalo-primary hover:text-zalo-primary transition flex items-center gap-1.5 flex-shrink-0"
+                :disabled="isMigrating"
+                class="px-4 py-2.5 bg-white border border-gray-300 rounded-lg text-sm font-semibold text-gray-700 hover:bg-gray-50 hover:border-zalo-primary hover:text-zalo-primary transition flex items-center gap-1.5 flex-shrink-0 disabled:opacity-50 disabled:cursor-wait"
               >
-                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
-                Thay đổi
+                <template v-if="isMigrating">
+                  <svg class="animate-spin h-3.5 w-3.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  Đang chuyển...
+                </template>
+                <template v-else>
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+                  Thay đổi
+                </template>
               </button>
             </div>
 
+            <!-- Migration Error -->
+            <div v-if="migrationError" class="flex items-center gap-2 bg-red-50 border border-red-200 rounded-lg p-3 mt-2 mb-2">
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-red-500 flex-shrink-0"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg>
+              <p class="text-sm text-red-700 flex-1">{{ migrationError }}</p>
+            </div>
+
             <!-- Restart Banner -->
-            <div v-if="needsRestart" class="flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-lg p-3 mt-2">
-              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-amber-500 flex-shrink-0"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
-              <p class="text-sm text-amber-800 flex-1">Cần khởi động lại ứng dụng để áp dụng đường dẫn mới.</p>
-              <button
-                @click="handleRestart"
-                class="px-4 py-1.5 bg-amber-500 text-white rounded-lg text-sm font-bold hover:bg-amber-600 transition flex-shrink-0"
-              >
-                Khởi động lại
-              </button>
+            <div v-if="needsRestart" class="flex flex-col gap-2 bg-emerald-50 border border-emerald-200 rounded-lg p-4 mt-2">
+              <div class="flex items-center gap-2">
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-emerald-600 flex-shrink-0"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
+                <p class="text-sm font-bold text-emerald-800">✅ Đã chuyển phiên đăng nhập thành công!</p>
+              </div>
+              <p class="text-xs text-emerald-700 ml-7">Phiên đăng nhập Zalo đã được sao chép sang thư mục mới. Tin nhắn cũ sẽ được Zalo tự động đồng bộ lại sau khi khởi động.</p>
+              <div class="ml-7 mt-1">
+                <button
+                  @click="handleRestart"
+                  class="px-5 py-2 bg-emerald-600 text-white rounded-lg text-sm font-bold hover:bg-emerald-700 transition shadow-sm"
+                >
+                  🔄 Khởi động lại ngay
+                </button>
+              </div>
             </div>
           </div>
 

@@ -15,11 +15,11 @@ function parseConversationItem(el: HTMLElement) {
 
   const rawName = innerTexts[0]
 
-  // ==== CHIẾN LƯỢC QUÉT BADGE ĐỎ (UNREAD) ====
+  // ==== CHIẾN LƯỢC QUÉT BADGE ĐỎ (UNREAD) — V4 siết chặt chống false positive ====
   let unreadCount = 0;
 
-  // Lớp 1: Bắt thẳng thóp qua Tên Class đặc trưng của Zalo Web
-  const badgeTags = el.querySelectorAll('[class*="unread"], [class*="badge"], [class*="notify"], [class*="Count"]');
+  // Lớp 1: Quét qua class chứa đúng "unread" (chỉ từ này, bỏ badge/notify/Count quá rộng)
+  const badgeTags = el.querySelectorAll('[class*="unread"]');
   for (const b of Array.from(badgeTags)) {
       const txt = (b.textContent || '').trim();
       if (/^\d+\+?$/.test(txt)) {
@@ -28,14 +28,30 @@ function parseConversationItem(el: HTMLElement) {
       }
   }
 
-  // Lớp 2: Phân Tích Màu Sắc (Huy hiệu gốc thường là Nền Màu Đỏ chứa Text Trắng)
+  // Lớp 2: Quét badge bằng visual — YÊU CẦU CẢ 3: nền đỏ + chữ trắng + kích thước nhỏ
   if (unreadCount === 0) {
       const allTextNodes = el.querySelectorAll('span, div');
       for (const b of Array.from(allTextNodes)) {
           const txt = (b.textContent || '').trim();
-          if (/^\d+$/.test(txt) && txt.length < 4 && b.childElementCount === 0) {
+          if (/^\d+\+?$/.test(txt) && txt.length < 4 && b.childElementCount === 0) {
              const style = window.getComputedStyle(b);
-             if (style.backgroundColor && style.backgroundColor !== 'rgba(0, 0, 0, 0)' && (style.color === 'rgb(255, 255, 255)' || style.borderRadius !== '0px')) {
+             const rect = b.getBoundingClientRect();
+
+             // Kiểm tra kích thước: badge unread luôn nhỏ (< 35px)
+             if (rect.width > 35 || rect.height > 35 || rect.width < 8) continue;
+
+             // Phân tích màu nền: phải là đỏ/cam cảnh báo
+             const bg = style.backgroundColor || '';
+             const bgMatch = bg.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
+             if (!bgMatch) continue;
+             const [, r, g, bVal] = bgMatch.map(Number);
+             const isRedOrange = r > 180 && g < 100 && bVal < 100; // Đỏ thuần
+             const isWarning = r > 200 && g > 100 && g < 180 && bVal < 80; // Cam cảnh báo
+
+             // Phải có chữ trắng
+             const isWhiteText = style.color === 'rgb(255, 255, 255)';
+
+             if ((isRedOrange || isWarning) && isWhiteText) {
                  unreadCount = parseInt(txt);
                  break;
              }
@@ -49,11 +65,7 @@ function parseConversationItem(el: HTMLElement) {
   // Regex nhận diện giờ
   const timeRegex = /^(\d{1,2}:\d{2}|\d{1,2}\/\d{1,2}|Hôm qua|Vài giây|\d+\s+(giây|phút|giờ|ngày|tuần|tháng|năm).*)$/i
 
-  // Lớp 3: Fallback (Logic mồ côi)
-  if (unreadCount === 0) {
-      const candidateTexts = innerTexts.filter(t => /^\d+\+?$/.test(t));
-      if (candidateTexts.length === 1 && parseInt(candidateTexts[0]) < 100) unreadCount = parseInt(candidateTexts[0]) || 0;
-  }
+  // Lớp 3 đã bị loại bỏ — quét số mồ côi gây false positive (99+ bug)
 
   for (let i = 1; i < innerTexts.length; i++) {
     const text = innerTexts[i]
@@ -120,54 +132,22 @@ function scrapeConversations() {
     })
   }
 
-  // ==== ĐẾM TỔNG TIN NHẮN CHƯA ĐỌC — 4 CHIẾN LƯỢC ====
+  // ==== ĐẾM TỔNG TIN NHẮN CHƯA ĐỌC — V4 ưu tiên badge thực tế ====
   let globalUnread = 0;
   
-  // Chiến lược 1: Quét Title Bar (Tin cậy nhất — Zalo tự thêm "(N)" vào tiêu đề)
-  const titleText = document.title || '';
-  const titleMatch = titleText.match(/\((\d+)\)/) || titleText.match(/\[(\d+)\]/);
-  if (titleMatch) {
-    globalUnread = parseInt(titleMatch[1]) || 0;
-  }
-
-  // Chiến lược 2: Quét Tọa Độ Cột Trái (Navbar Zalo X < 80px)
-  if (globalUnread === 0) {
-    const allLeafNodes = Array.from(document.querySelectorAll('div, span')).filter(el => {
-      return el.childElementCount === 0 && (el.textContent || '').trim().length > 0;
-    });
-
-    for (const b of allLeafNodes) {
-      const r = b.getBoundingClientRect();
-      const txt = (b.textContent || '').trim();
-      
-      // Mở rộng vùng quét: toàn bộ cột trái navbar Zalo
-      if (r.left >= 0 && r.right < 85 && r.width > 0 && r.height > 0) {
-        if (/^\d+\+?$/.test(txt) && parseInt(txt) < 1000) {
-          globalUnread += parseInt(txt);
-        } else if (txt === 'N' || txt === '!') {
-          globalUnread += 1;
-        }
-      }
-    }
-  }
-
-  // Chiến lược 3: Đếm tổng unread từ danh sách conversations đã scrape
-  if (globalUnread === 0 && convList.length > 0) {
+  // Chiến lược 1 (ưu tiên): Tổng unread từ conversations đã scrape
+  // → Chính xác nhất vì khớp với badge đỏ user nhìn thấy trên danh sách chat
+  if (convList.length > 0) {
     globalUnread = convList.reduce((sum: number, c: any) => sum + (c.unread || 0), 0);
   }
 
-  // Chiến lược 4: Quét badge bằng CSS selector phổ quát
-  if (globalUnread === 0) {
-    const badgeElements = document.querySelectorAll(
-      '[class*="badge"], [class*="unread"], [class*="notify"], [class*="count"], [class*="num"]'
-    );
-    for (const el of Array.from(badgeElements)) {
-      const txt = (el.textContent || '').trim();
-      const r = el.getBoundingClientRect();
-      // Chỉ lấy badge ở vùng trái (không lấy badge trong chat content)
-      if (/^\d+\+?$/.test(txt) && r.left < 400 && r.width < 40 && r.height < 40) {
-        globalUnread += parseInt(txt) || 0;
-      }
+  // Chiến lược 2 (fallback): Quét Title Bar — chỉ dùng khi không scrape được conversation nào
+  // (VD: Zalo chưa load xong danh sách chat)
+  if (globalUnread === 0 && convList.length === 0) {
+    const titleText = document.title || '';
+    const titleMatch = titleText.match(/\((\d+)\)/) || titleText.match(/\[(\d+)\]/);
+    if (titleMatch) {
+      globalUnread = parseInt(titleMatch[1]) || 0;
     }
   }
 

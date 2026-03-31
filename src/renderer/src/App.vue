@@ -9,6 +9,7 @@ import ConversationList from './components/ConversationList.vue'
 import ChatWindow from './components/ChatWindow.vue'
 import CrmPanel from './components/CrmPanel.vue'
 import SettingsModal from './components/SettingsModal.vue'
+import MigrationBanner from './components/MigrationBanner.vue'
 
 // ===== STATE =====
 const activeTab = ref<string>('1')
@@ -23,6 +24,12 @@ const webviewPreloadPath = ref(window.api?.getWebviewPreloadPath?.() || '')
 const soundEnabled = ref(true)
 const notificationEnabled = ref(true)
 const storagePath = ref('')
+
+// ===== MIGRATION STATE =====
+const showMigrationBanner = ref(false)
+const migrationOldPath = ref('')
+const migrationOldSizeMB = ref(0)
+const isMigrationDeleting = ref(false)
 
 // ===== COMPUTED =====
 const visibleAccounts = computed(() => accounts.value.filter(a => !a.isHidden))
@@ -63,6 +70,18 @@ onMounted(async () => {
     storagePath.value = await window.api.getStoragePath()
   } catch (e) {
     storagePath.value = 'Không xác định'
+  }
+
+  // Check migration status — hiện banner nếu có dữ liệu cũ chưa xóa
+  try {
+    const migration = await window.api.getMigrationStatus()
+    if (migration.status === 'completed' || migration.status === 'dismissed') {
+      migrationOldPath.value = migration.oldPath || ''
+      migrationOldSizeMB.value = Math.round((migration.oldSizeBytes || 0) / 1024 / 1024)
+      showMigrationBanner.value = true
+    }
+  } catch (e) {
+    console.error('OmniChat: Lỗi kiểm tra migration:', e)
   }
 
   // Load accounts
@@ -182,10 +201,48 @@ const openChat = (conv: Conversation) => {
     wv.send('open-conversation', originalId)
   }
 }
+
+// ===== MIGRATION HANDLERS =====
+const handleDeleteOldStorage = async () => {
+  isMigrationDeleting.value = true
+  try {
+    const result = await window.api.deleteOldStorage()
+    if (result.success) {
+      showMigrationBanner.value = false
+    } else if (result.error !== 'cancelled') {
+      console.error('OmniChat: Lỗi xóa dữ liệu cũ:', result.error)
+    }
+  } catch (e) {
+    console.error('OmniChat: Lỗi xóa dữ liệu cũ:', e)
+  } finally {
+    isMigrationDeleting.value = false
+  }
+}
+
+const handleDismissMigration = async () => {
+  showMigrationBanner.value = false
+  try {
+    await window.api.dismissMigration()
+  } catch (e) {
+    console.error('OmniChat: Lỗi dismiss migration:', e)
+  }
+}
 </script>
 
 <template>
-  <div class="flex h-screen w-screen bg-zalo-bg text-zalo-text overflow-hidden">
+  <div class="flex flex-col h-screen w-screen bg-zalo-bg text-zalo-text overflow-hidden">
+
+    <!-- Migration Banner: Thông báo dữ liệu cũ cần xóa -->
+    <MigrationBanner
+      :show="showMigrationBanner"
+      :old-path="migrationOldPath"
+      :old-size-m-b="migrationOldSizeMB"
+      :is-deleting="isMigrationDeleting"
+      @delete="handleDeleteOldStorage"
+      @dismiss="handleDismissMigration"
+    />
+
+    <div class="flex flex-1 min-h-0">
 
     <!-- Cột 1: Sidebar -->
     <AccountSidebar
@@ -253,6 +310,7 @@ const openChat = (conv: Conversation) => {
       @update:sound-enabled="(val) => soundEnabled = val"
       @update:notification-enabled="(val) => notificationEnabled = val"
     />
+    </div>
   </div>
 </template>
 

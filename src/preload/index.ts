@@ -8,8 +8,20 @@ const api = {
 
   // ===== Storage Path APIs =====
   getStoragePath: (): Promise<string> => ipcRenderer.invoke('get-storage-path'),
-  selectStorageFolder: (): Promise<string | null> => ipcRenderer.invoke('select-storage-folder'),
-  restartApp: (): Promise<void> => ipcRenderer.invoke('restart-app')
+  selectStorageFolder: (): Promise<{ success: boolean; newPath?: string; error?: string }> =>
+    ipcRenderer.invoke('select-storage-folder'),
+  restartApp: (): Promise<void> => ipcRenderer.invoke('restart-app'),
+
+  // ===== Migration APIs =====
+  getMigrationStatus: (): Promise<{
+    status: 'none' | 'completed' | 'dismissed'
+    oldPath?: string
+    newPath?: string
+    oldSizeBytes?: number
+  }> => ipcRenderer.invoke('get-migration-status'),
+  deleteOldStorage: (): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke('delete-old-storage'),
+  dismissMigration: (): Promise<{ success: boolean }> => ipcRenderer.invoke('dismiss-migration')
 }
 
 // Use `contextBridge` APIs to expose Electron APIs to
