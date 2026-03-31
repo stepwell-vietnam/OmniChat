@@ -1,0 +1,10 @@
+node_modules/
+dist/
+out/
+.DS_Store
+.eslintcache
+*.log
+.npm-cache/
+temp_cache/
+electron.zip
+*.zip
