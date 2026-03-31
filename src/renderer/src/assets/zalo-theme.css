@@ -1,0 +1,55 @@
+@theme {
+  --color-zalo-primary: #0068ff;
+  --color-zalo-primary-hover: #0056cc;
+  --color-zalo-sent: #e5f1ff;
+  --color-zalo-bg-hover: #f3f5f6;
+  --color-zalo-bg: #ffffff;
+  --color-zalo-bg-sidebar: #0056cc; /* Leftmost dark blue bar */
+  --color-zalo-bg-sidebar-icon: #0068ff;
+  --color-zalo-bg-list: #ffffff;
+  --color-zalo-text: #111111;
+  --color-zalo-text-secondary: #7589a3;
+  --color-zalo-border: #e1e4ea;
+  
+  --font-zalo: 'Segoe UI', 'Inter', -apple-system, BlinkMacSystemFont, Tahoma, Arial, sans-serif;
+}
+
+:root {
+  font-family: var(--font-zalo);
+  font-size: 14px;
+}
+
+body, html {
+  margin: 0;
+  padding: 0;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  background-color: var(--color-zalo-bg);
+  color: var(--color-zalo-text);
+  user-select: none;
+}
+
+/* Scrollbar styling - Clone Zalo */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #c3c5c9;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #a6a9af;
+}
+
+/* Remove default focus outlines */
+*:focus {
+  outline: none;
+}
