@@ -4,7 +4,7 @@ import type { Account } from '../types'
 
 export function useNotifications(
   soundEnabled: Ref<boolean>,
-  notificationEnabled: Ref<boolean>
+  _notificationEnabled: Ref<boolean>
 ) {
   const previousUnreadCounts = ref<Record<string, number>>({})
 

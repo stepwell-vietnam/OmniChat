@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import type { Account } from '../types'
+import type { Account, Platform } from '../types'
+import { PLATFORMS } from '../types'
 import { getInitials } from '../utils'
 
 const props = defineProps<{
@@ -13,7 +14,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   close: []
-  addAccount: []
+  addAccount: [platform: Platform]
   toggleVisibility: [id: string]
   updateName: [id: string, name: string]
   uploadAvatar: [id: string, data: string]
@@ -136,7 +137,8 @@ const activeSection = ref<'accounts' | 'system'>('accounts')
                 placeholder="Nhập tên gọi nhớ (VD: Zalo Bán Hàng)"
               />
               <div class="text-xs text-gray-400 mt-1 flex items-center gap-2 flex-wrap">
-                <span class="truncate">Phân vùng: <code class="bg-gray-200 px-1 py-0.5 rounded text-[10px] text-gray-500 font-mono">persist:zalo_{{ acc.id }}</code></span>
+                <span class="px-1.5 py-0.5 rounded text-[10px] font-bold text-white" :class="PLATFORMS[acc.platform || 'zalo']?.color || 'bg-gray-500'">{{ PLATFORMS[acc.platform || 'zalo']?.name || 'Unknown' }}</span>
+                <span class="truncate">Partition: <code class="bg-gray-200 px-1 py-0.5 rounded text-[10px] text-gray-500 font-mono">persist:{{ acc.platform || 'zalo' }}_{{ acc.id }}</code></span>
                 <span v-if="acc.zaloDisplayName" class="text-blue-500">• Zalo: {{ acc.zaloDisplayName }}</span>
                 <span v-if="acc.zaloAvatarUrl" class="text-green-500">• Ảnh tự động ✓</span>
                 <span v-if="acc.unread > 0" class="text-red-500 font-bold">• {{ acc.unread }} chưa đọc</span>
@@ -162,11 +164,21 @@ const activeSection = ref<'accounts' | 'system'>('accounts')
             </div>
           </div>
 
-          <!-- Add Account Button -->
-          <button @click="emit('addAccount')" class="w-full py-4 border-2 border-dashed border-blue-200 rounded-lg text-blue-500 font-bold hover:border-zalo-primary hover:text-white hover:bg-zalo-primary transition flex justify-center items-center gap-2 focus:outline-none">
-            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
-            TẠO THÊM PHÂN VÙNG ZALO MỚI
-          </button>
+          <!-- Add Account Buttons -->
+          <div class="flex gap-3">
+            <button @click="emit('addAccount', 'zalo')" class="flex-1 py-3 border-2 border-dashed border-blue-200 rounded-lg text-blue-600 font-bold hover:border-blue-500 hover:bg-blue-50 transition flex justify-center items-center gap-2 focus:outline-none">
+              <span class="w-6 h-6 bg-blue-600 text-white rounded-full flex items-center justify-center text-xs font-bold">Z</span>
+              Zalo
+            </button>
+            <button @click="emit('addAccount', 'whatsapp')" class="flex-1 py-3 border-2 border-dashed border-green-200 rounded-lg text-green-600 font-bold hover:border-green-500 hover:bg-green-50 transition flex justify-center items-center gap-2 focus:outline-none">
+              <span class="w-6 h-6 bg-green-600 text-white rounded-full flex items-center justify-center text-xs font-bold">W</span>
+              WhatsApp
+            </button>
+            <button @click="emit('addAccount', 'messenger')" class="flex-1 py-3 border-2 border-dashed border-purple-200 rounded-lg text-purple-600 font-bold hover:border-purple-500 hover:bg-purple-50 transition flex justify-center items-center gap-2 focus:outline-none">
+              <span class="w-6 h-6 bg-purple-600 text-white rounded-full flex items-center justify-center text-xs font-bold">M</span>
+              Messenger
+            </button>
+          </div>
         </div>
 
         <!-- ===== TAB 2: CÀI ĐẶT HỆ THỐNG ===== -->

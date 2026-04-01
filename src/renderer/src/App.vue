@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, watch, onMounted, computed } from 'vue'
-import type { Account } from './types'
-import { ACCOUNT_COLORS } from './utils'
+import type { Account, Platform } from './types'
+import { PLATFORMS } from './types'
 import { db, getSetting, setSetting } from './database/db'
 import { useNotifications } from './composables/useNotifications'
 import AccountSidebar from './components/AccountSidebar.vue'
@@ -77,11 +77,11 @@ onMounted(async () => {
   try {
     const saved = await db.accounts.toArray()
     if (saved.length > 0) {
-      accounts.value = saved.map(a => ({ ...a, unread: 0 }))
+      accounts.value = saved.map(a => ({ ...a, platform: (a as any).platform || 'zalo', unread: 0 } as Account))
     } else {
       const defaults: Account[] = [
-        { id: '1', name: 'Zalo 1', color: 'bg-blue-600', isHidden: false, unread: 0 },
-        { id: '2', name: 'Zalo 2', color: 'bg-green-600', isHidden: false, unread: 0 }
+        { id: '1', name: 'Zalo 1', platform: 'zalo', color: 'bg-blue-600', isHidden: false, unread: 0 },
+        { id: '2', name: 'Zalo 2', platform: 'zalo', color: 'bg-green-600', isHidden: false, unread: 0 }
       ]
       accounts.value = defaults
       for (const acc of defaults) {
@@ -92,8 +92,8 @@ onMounted(async () => {
   } catch (e) {
     console.error('OmniChat: Error loading accounts', e)
     accounts.value = [
-      { id: '1', name: 'Zalo 1', color: 'bg-blue-600', isHidden: false, unread: 0 },
-      { id: '2', name: 'Zalo 2', color: 'bg-green-600', isHidden: false, unread: 0 }
+      { id: '1', name: 'Zalo 1', platform: 'zalo', color: 'bg-blue-600', isHidden: false, unread: 0 },
+      { id: '2', name: 'Zalo 2', platform: 'zalo', color: 'bg-green-600', isHidden: false, unread: 0 }
     ]
   }
 
@@ -129,11 +129,14 @@ const handleSelectTab = (id: string) => {
   }
 }
 
-const handleAddAccount = () => {
+const handleAddAccount = (platform: Platform = 'zalo') => {
+  const pf = PLATFORMS[platform]
+  const count = accounts.value.filter(a => a.platform === platform).length + 1
   accounts.value.push({
     id: Date.now().toString(),
-    name: 'Zalo ' + (accounts.value.length + 1),
-    color: ACCOUNT_COLORS[accounts.value.length % ACCOUNT_COLORS.length],
+    name: pf.name + ' ' + count,
+    platform: platform,
+    color: pf.color,
     isHidden: false, unread: 0
   })
 }
@@ -155,6 +158,12 @@ const handleUpdateName = (id: string, name: string) => {
 const handleUploadAvatar = (id: string, data: string) => {
   const acc = accounts.value.find(a => a.id === id)
   if (acc) acc.avatarBase64 = data
+}
+
+// ===== WEBVIEW CONTROLS =====
+const handleRefreshWebview = () => {
+  const wv = document.getElementById('webview_' + activeTab.value) as any
+  if (wv?.reload) wv.reload()
 }
 
 // ===== IPC HANDLING =====
@@ -179,8 +188,10 @@ const handleIpcMessage = (event: any, acc: Account) => {
     hasNewMessage.value = { ...hasNewMessage.value, [acc.id]: true }
 
     if (notificationEnabled.value && Notification.permission === 'granted') {
+      const icon = payload.data.icon || acc.zaloAvatarUrl || acc.avatarBase64 || ''
       new Notification(acc.zaloDisplayName || acc.name, {
-        body: payload.data.body || payload.data.title || 'Tin nhan moi!'
+        body: payload.data.body || payload.data.title || 'Tin nhan moi!',
+        icon: icon
       })
     }
   }
@@ -233,8 +244,8 @@ const handleDismissMigration = async () => {
           v-for="acc in accounts"
           :id="'webview_' + acc.id"
           :key="'wv-' + acc.id"
-          :src="'https://chat.zalo.me'"
-          :partition="'persist:zalo_' + acc.id"
+          :src="PLATFORMS[acc.platform || 'zalo']?.url || 'https://chat.zalo.me'"
+          :partition="'persist:' + (acc.platform || 'zalo') + '_' + acc.id"
           :preload="webviewPreloadPath"
           @ipc-message="(e: any) => handleIpcMessage(e, acc)"
           class="absolute top-0 left-0 w-full h-full flex-1 outline-none border-none bg-[#f1f2f4]"
@@ -246,6 +257,18 @@ const handleDismissMigration = async () => {
           useragent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
           allowpopups
         ></webview>
+
+        <!-- Floating Refresh Button -->
+        <button
+          @click="handleRefreshWebview"
+          class="absolute top-3 right-3 z-20 w-9 h-9 rounded-full bg-black/20 hover:bg-black/50 text-white flex items-center justify-center transition-all opacity-40 hover:opacity-100 backdrop-blur-sm"
+          title="Tải lại trang (Refresh)"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="23 4 23 10 17 10"></polyline>
+            <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+          </svg>
+        </button>
       </main>
 
       <!-- Settings -->

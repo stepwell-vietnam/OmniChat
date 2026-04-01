@@ -1,13 +1,23 @@
 // ===== STEPWELL OMNICHAT — TYPE DEFINITIONS =====
 
-/** Zalo account in the system */
+export type Platform = 'zalo' | 'whatsapp' | 'messenger'
+
+/** Platform configuration */
+export const PLATFORMS: Record<Platform, { name: string; url: string; color: string; icon: string }> = {
+  zalo: { name: 'Zalo', url: 'https://chat.zalo.me', color: 'bg-blue-600', icon: 'Z' },
+  whatsapp: { name: 'WhatsApp', url: 'https://web.whatsapp.com', color: 'bg-green-600', icon: 'W' },
+  messenger: { name: 'Messenger', url: 'https://www.messenger.com', color: 'bg-purple-600', icon: 'M' }
+}
+
+/** Account in the system */
 export interface Account {
   id: string
   name: string
-  avatarBase64?: string       // User-uploaded avatar (highest priority)
-  zaloAvatarUrl?: string      // Auto-scraped from Zalo Web (priority 2)
-  zaloDisplayName?: string    // Auto-scraped display name
+  platform: Platform
+  avatarBase64?: string
+  zaloAvatarUrl?: string
+  zaloDisplayName?: string
   color: string
   isHidden: boolean
-  unread: number              // Runtime-only: unread count from webview
+  unread: number
 }
