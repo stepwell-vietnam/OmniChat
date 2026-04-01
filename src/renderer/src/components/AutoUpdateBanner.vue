@@ -15,9 +15,8 @@ const isDismissed = ref(false)
 
 onMounted(async () => {
   try {
-    // Để tránh lỗi CORS chặn Google Drive, anh nên upload file version.json này lên một nơi chứa code dạng thô (Raw) 
-    // Gợi ý: GitHub / GitLab Raw File, hoặc JSONBin.io
-    const response = await fetch('https://raw.githubusercontent.com/stepwellvietnam/chatportal/main/version.json', { cache: 'no-store' })
+    // Sử dụng link RAW của Gitlab dự án Stepwell OmniChat (đã check: đang Public)
+    const response = await fetch('https://gitlab.com/stepwellvietnam/chatportal/-/raw/main/version.json', { cache: 'no-store' })
     if (response.ok) {
       const data = await response.json()
       const remoteVersion = parseFloat(data.version)
