@@ -4,3 +4,4 @@ Phase 1:
 - Tính năng thông báo tin nhắn mới
 - Tính năng chuyển đổi thư mục lưu data chống tràn ổ hệ điều hành
 - Hiệu chỉnh tính năng đếm số tin nhắn mới chưa đọc
+- Tối ưu code 85% và thêm thông báo khi nhận tin nhắn

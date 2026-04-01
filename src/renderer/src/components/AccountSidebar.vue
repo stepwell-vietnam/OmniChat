@@ -7,6 +7,7 @@ defineProps<{
   activeTab: string
   unreadCounts: Record<string, number>
   totalUnreadAll: number
+  hasNewMessage: Record<string, boolean>
 }>()
 
 const emit = defineEmits<{
@@ -17,22 +18,6 @@ const emit = defineEmits<{
 
 <template>
   <aside class="w-16 h-full bg-zalo-bg-sidebar flex flex-col items-center py-4 gap-4 flex-shrink-0 border-r border-zalo-bg-sidebar-icon z-10 relative">
-
-    <!-- Nút "ALL" (Ẩn theo yêu cầu tạm thời) -->
-    <button
-      v-show="false"
-      class="w-12 h-12 rounded-xl flex items-center justify-center transition focus:outline-none relative"
-      :class="activeTab === 'all' ? 'bg-[#003c99]' : 'hover:bg-zalo-bg-sidebar-icon'"
-      @click="emit('selectTab', 'all')"
-      title="Hộp thư hợp nhất"
-    >
-      <span class="text-white font-bold text-xs leading-none text-center">Tất<br/>cả</span>
-      <div v-if="totalUnreadAll > 0" class="absolute -top-1.5 -right-1.5 bg-red-500 text-white text-[10px] font-bold rounded-full h-[18px] min-w-[18px] px-1 flex items-center justify-center border border-white shadow-sm z-20">
-        {{ totalUnreadAll > 99 ? '99+' : totalUnreadAll }}
-      </div>
-    </button>
-
-    <div class="w-10 h-[1px] bg-[#004dc0] my-2"></div>
 
     <!-- Danh sách tài khoản Zalo -->
     <div
@@ -55,17 +40,19 @@ const emit = defineEmits<{
         <span v-else>{{ getInitials(acc.name) }}</span>
       </button>
 
-      <!-- 🔴 BADGE ĐỎ NỔI BẬT — Nằm NGOÀI button, không bị cắt -->
+      <!-- 🔔 CHUÔNG VÀNG — Có tin nhắn mới (nhấp nháy + bounce) -->
       <div
-        v-if="unreadCounts[acc.id] > 0"
-        class="absolute -top-1.5 -right-1.5 bg-red-500 text-white font-black rounded-full min-w-[24px] h-[24px] px-1 flex items-center justify-center border-2 border-[#0056cc] z-30 pointer-events-none"
-        :class="unreadCounts[acc.id] > 9 ? 'text-[10px]' : 'text-[12px]'"
-        style="box-shadow: 0 2px 8px rgba(239, 68, 68, 0.7);"
+        v-if="hasNewMessage[acc.id]"
+        class="absolute -top-1 -right-1 w-6 h-6 flex items-center justify-center z-30 pointer-events-none bell-bounce"
       >
-        {{ unreadCounts[acc.id] > 99 ? '99+' : (unreadCounts[acc.id] > 9 ? '9+' : unreadCounts[acc.id]) }}
+        <div class="w-6 h-6 bg-yellow-400 rounded-full flex items-center justify-center shadow-lg border-2 border-white">
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="text-yellow-800">
+            <path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.9 2 2 2zm6-6v-5c0-3.07-1.63-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.64 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2z"/>
+          </svg>
+        </div>
       </div>
 
-      <!-- 🟢 Chấm xanh trạng thái -->
+      <!-- 🟢 Chấm xanh trạng thái khi active -->
       <div
         v-if="activeTab === acc.id"
         class="absolute bottom-0 right-0 w-3 h-3 bg-green-400 rounded-full border-2 border-[#0056cc] z-20 pointer-events-none"
@@ -80,3 +67,18 @@ const emit = defineEmits<{
     </div>
   </aside>
 </template>
+
+<style scoped>
+.bell-bounce {
+  animation: bellBounce 1s ease-in-out infinite;
+}
+
+@keyframes bellBounce {
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  15% { transform: translateY(-3px) rotate(-10deg); }
+  30% { transform: translateY(0) rotate(10deg); }
+  45% { transform: translateY(-2px) rotate(-5deg); }
+  60% { transform: translateY(0) rotate(5deg); }
+  75% { transform: translateY(-1px) rotate(0deg); }
+}
+</style>
