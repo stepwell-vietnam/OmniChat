@@ -6,3 +6,4 @@ Phase 1:
 - Hiệu chỉnh tính năng đếm số tin nhắn mới chưa đọc
 - Tối ưu code 85% và thêm thông báo khi nhận tin nhắn
 - [V1.2] Bổ sung nút Refresh Webview và cấu trúc mở rộng đa nền tảng (Zalo, FB,...)
+- [V1.3] Tính năng tự động thông báo cập nhật (Auto Update Banner)

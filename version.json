@@ -1,0 +1,6 @@
+{
+  "version": "1.3",
+  "mac_url": "https://drive.google.com/uc?export=download&id=FILL_YOUR_MAC_FILE_ID_HERE",
+  "win_url": "https://drive.google.com/uc?export=download&id=FILL_YOUR_WIN_FILE_ID_HERE",
+  "changelog": "Tính năng mới: Kiểm tra cập nhật tự động. Cải tiến độ ổn định và fix lỗi hiển thị Zalo/Facebook."
+}

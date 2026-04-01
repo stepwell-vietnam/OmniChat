@@ -7,6 +7,7 @@ import { useNotifications } from './composables/useNotifications'
 import AccountSidebar from './components/AccountSidebar.vue'
 import SettingsModal from './components/SettingsModal.vue'
 import MigrationBanner from './components/MigrationBanner.vue'
+import AutoUpdateBanner from './components/AutoUpdateBanner.vue'
 
 // ===== STATE =====
 const activeTab = ref<string>('1')
@@ -215,6 +216,8 @@ const handleDismissMigration = async () => {
 
 <template>
   <div class="flex flex-col h-screen w-screen bg-zalo-bg text-zalo-text overflow-hidden">
+
+    <AutoUpdateBanner />
 
     <MigrationBanner
       :show="showMigrationBanner"
