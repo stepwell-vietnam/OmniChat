@@ -33,7 +33,17 @@ const api = {
 
   // ===== Snippet Relay =====
   saveSnippetsCache: (data: string): Promise<boolean> =>
-    ipcRenderer.invoke('save-snippets-cache', data)
+    ipcRenderer.invoke('save-snippets-cache', data),
+
+  // ===== Backup/Restore (chống mất dữ liệu khi cài mới / cập nhật) =====
+  saveAccountsBackup: (data: string): Promise<boolean> =>
+    ipcRenderer.invoke('save-accounts-backup', data),
+  loadAccountsBackup: (): Promise<string | null> =>
+    ipcRenderer.invoke('load-accounts-backup'),
+  saveSnippetsBackup: (data: string): Promise<boolean> =>
+    ipcRenderer.invoke('save-snippets-backup', data),
+  loadSnippetsBackup: (): Promise<string | null> =>
+    ipcRenderer.invoke('load-snippets-backup')
 }
 
 // Use `contextBridge` APIs to expose Electron APIs to

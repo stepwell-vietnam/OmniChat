@@ -23,6 +23,11 @@ declare global {
       pasteImagesToWebview: (webContentsId: number, filePaths: string[]) => Promise<boolean>
       // Snippet Relay
       saveSnippetsCache: (data: string) => Promise<boolean>
+      // Backup/Restore
+      saveAccountsBackup: (data: string) => Promise<boolean>
+      loadAccountsBackup: () => Promise<string | null>
+      saveSnippetsBackup: (data: string) => Promise<boolean>
+      loadSnippetsBackup: () => Promise<string | null>
     }
   }
 }

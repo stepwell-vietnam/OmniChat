@@ -529,6 +529,51 @@ app.whenReady().then(() => {
     event.returnValue = snippetsCacheStore
   })
 
+  // ===== IPC: Backup/Restore — Lưu accounts & snippets ra file JSON (chống mất dữ liệu khi cài mới) =====
+  const BACKUP_DIR = join(app.getPath('userData'), 'omnichat-backup')
+
+  ipcMain.handle('save-accounts-backup', (_e, data: string) => {
+    try {
+      if (!fs.existsSync(BACKUP_DIR)) fs.mkdirSync(BACKUP_DIR, { recursive: true })
+      fs.writeFileSync(join(BACKUP_DIR, 'accounts.json'), data, 'utf-8')
+      return true
+    } catch (e) {
+      console.error('OmniChat: Lỗi backup accounts:', e)
+      return false
+    }
+  })
+
+  ipcMain.handle('load-accounts-backup', () => {
+    try {
+      const f = join(BACKUP_DIR, 'accounts.json')
+      if (fs.existsSync(f)) return fs.readFileSync(f, 'utf-8')
+    } catch (e) {
+      console.error('OmniChat: Lỗi đọc backup accounts:', e)
+    }
+    return null
+  })
+
+  ipcMain.handle('save-snippets-backup', (_e, data: string) => {
+    try {
+      if (!fs.existsSync(BACKUP_DIR)) fs.mkdirSync(BACKUP_DIR, { recursive: true })
+      fs.writeFileSync(join(BACKUP_DIR, 'snippets.json'), data, 'utf-8')
+      return true
+    } catch (e) {
+      console.error('OmniChat: Lỗi backup snippets:', e)
+      return false
+    }
+  })
+
+  ipcMain.handle('load-snippets-backup', () => {
+    try {
+      const f = join(BACKUP_DIR, 'snippets.json')
+      if (fs.existsSync(f)) return fs.readFileSync(f, 'utf-8')
+    } catch (e) {
+      console.error('OmniChat: Lỗi đọc backup snippets:', e)
+    }
+    return null
+  })
+
   // IPC Handlers
   ipcMain.on('ping', () => console.log('pong'))
 

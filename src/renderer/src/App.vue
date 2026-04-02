@@ -72,16 +72,36 @@ onMounted(async () => {
   // Load snippets
   try {
     snippets.value = await db.quickReplies.toArray()
-    // Tạo mẫu mặc định nếu chưa có snippet nào
+    // Nếu IndexedDB trống snippet, thử khôi phục từ backup
     if (snippets.value.length === 0) {
-      const defaultSnippet = {
-        shortcut: 'xinchao',
-        content: 'Đây là nội dung tin nhắn mẫu. Tin nhắn sẽ được đính kèm tối đa 6 hình ảnh. Khi gửi phần text sẽ gửi trước và hình ảnh gửi sau.',
-        imagePaths: [] as string[],
-        createdAt: Date.now()
+      let snippetRestored = false
+      try {
+        const backupJson = await window.api.loadSnippetsBackup()
+        if (backupJson) {
+          const backupSnippets = JSON.parse(backupJson) as any[]
+          if (backupSnippets.length > 0) {
+            for (const s of backupSnippets) {
+              const id = await db.quickReplies.add({ shortcut: s.shortcut, content: s.content, imagePaths: s.imagePaths || [], createdAt: s.createdAt || Date.now() }) as number
+              snippets.value.push({ id, shortcut: s.shortcut, content: s.content, imagePaths: s.imagePaths || [], createdAt: s.createdAt || Date.now() })
+            }
+            snippetRestored = true
+            console.log('OmniChat: ✅ Khôi phục thành công', backupSnippets.length, 'tin nhắn mẫu từ backup!')
+          }
+        }
+      } catch (e) {
+        console.warn('OmniChat: Không thể đọc backup snippets:', e)
       }
-      const id = await db.quickReplies.add(defaultSnippet) as number
-      snippets.value.push({ id, ...defaultSnippet })
+
+      if (!snippetRestored) {
+        const defaultSnippet = {
+          shortcut: 'xinchao',
+          content: 'Đây là nội dung tin nhắn mẫu. Tin nhắn sẽ được đính kèm tối đa 6 hình ảnh. Khi gửi phần text sẽ gửi trước và hình ảnh gửi sau.',
+          imagePaths: [] as string[],
+          createdAt: Date.now()
+        }
+        const id = await db.quickReplies.add(defaultSnippet) as number
+        snippets.value.push({ id, ...defaultSnippet })
+      }
     }
     syncSnippetsToWebviews()
   } catch (e) {
@@ -104,14 +124,37 @@ onMounted(async () => {
     if (saved.length > 0) {
       accounts.value = saved.map(a => ({ ...a, platform: (a as any).platform || 'zalo', unread: 0 } as Account))
     } else {
-      const defaults: Account[] = [
-        { id: '1', name: 'Zalo 1', platform: 'zalo', color: 'bg-blue-600', isHidden: false, unread: 0 },
-        { id: '2', name: 'Zalo 2', platform: 'zalo', color: 'bg-green-600', isHidden: false, unread: 0 }
-      ]
-      accounts.value = defaults
-      for (const acc of defaults) {
-        const { unread: _, ...dbAcc } = acc
-        await db.accounts.put(dbAcc)
+      // IndexedDB trống — thử khôi phục từ backup JSON trên ổ cứng
+      let restored = false
+      try {
+        const backupJson = await window.api.loadAccountsBackup()
+        if (backupJson) {
+          const backupAccounts = JSON.parse(backupJson) as any[]
+          if (backupAccounts.length > 0) {
+            accounts.value = backupAccounts.map(a => ({ ...a, platform: a.platform || 'zalo', unread: 0 } as Account))
+            // Ghi lại vào IndexedDB
+            for (const acc of accounts.value) {
+              const { unread: _, ...dbAcc } = acc
+              await db.accounts.put(dbAcc)
+            }
+            restored = true
+            console.log('OmniChat: ✅ Khôi phục thành công', backupAccounts.length, 'tài khoản từ backup!')
+          }
+        }
+      } catch (e) {
+        console.warn('OmniChat: Không thể đọc backup accounts:', e)
+      }
+
+      if (!restored) {
+        const defaults: Account[] = [
+          { id: '1', name: 'Zalo 1', platform: 'zalo', color: 'bg-blue-600', isHidden: false, unread: 0 },
+          { id: '2', name: 'Zalo 2', platform: 'zalo', color: 'bg-green-600', isHidden: false, unread: 0 }
+        ]
+        accounts.value = defaults
+        for (const acc of defaults) {
+          const { unread: _, ...dbAcc } = acc
+          await db.accounts.put(dbAcc)
+        }
       }
     }
   } catch (e) {
@@ -127,13 +170,16 @@ onMounted(async () => {
   }
 })
 
-// Persist accounts
+// Persist accounts + backup to JSON file
 watch(accounts, async (val) => {
   try {
     for (const acc of val) {
       const { unread: _, ...dbAcc } = acc
       await db.accounts.put(dbAcc)
     }
+    // Backup ra file JSON trên ổ cứng (đề phòng mất IndexedDB)
+    const backupData = val.map(a => ({ id: a.id, name: a.name, platform: a.platform, avatarBase64: a.avatarBase64, zaloAvatarUrl: a.zaloAvatarUrl, zaloDisplayName: a.zaloDisplayName, color: a.color, isHidden: a.isHidden }))
+    window.api.saveAccountsBackup(JSON.stringify(backupData))
   } catch (e) { /* silent */ }
 }, { deep: true })
 
@@ -201,6 +247,15 @@ const syncSnippetsToWebviews = () => {
     imageCount: (s.imagePaths || []).length
   }))
   window.api.saveSnippetsCache(JSON.stringify(metadata))
+
+  // Backup snippets ra file JSON trên ổ cứng (đề phòng mất IndexedDB khi cài mới)
+  const backupData = snippets.value.map(s => ({
+    shortcut: s.shortcut,
+    content: s.content,
+    imagePaths: s.imagePaths || [],
+    createdAt: s.createdAt
+  }))
+  window.api.saveSnippetsBackup(JSON.stringify(backupData))
 }
 
 // ===== SNIPPETS MANAGEMENT =====
