@@ -97,7 +97,75 @@ function scrapeAccountInfo() {
   }
 }
 
-// === 3. ENGINE: Title Observer + Periodic Avatar Sync ===
+// === 3. ENGINE: Title Observer + DOM Unread Scanner + Avatar Sync ===
+let lastReportedUnread = -1
+
+function reportUnread(count: number): void {
+  if (count !== lastReportedUnread) {
+    lastReportedUnread = count
+    ipcRenderer.sendToHost('zalo-data', {
+      type: 'global-unread',
+      data: count
+    })
+  }
+}
+
+// Quét DOM để đếm số tin chưa đọc (hoạt động ngay cả khi tiêu đề không đổi)
+function scanDomForUnread(): number {
+  let totalUnread = 0
+
+  // === CHIẾN THUẬT 1: Đếm badge số trong danh sách chat Zalo ===
+  // Zalo hiển thị số chưa đọc dạng: <span>5</span> hoặc <div>99+</div> bên cạnh tên cuộc trò chuyện
+  const badges = document.querySelectorAll(
+    '[class*="unread"], [class*="badge"], [class*="count"]'
+  )
+  for (const el of Array.from(badges)) {
+    const text = (el as HTMLElement).textContent?.trim() || ''
+    const rect = (el as HTMLElement).getBoundingClientRect()
+    // Chỉ tính các badge nhỏ, nằm trong vùng danh sách chat (bên trái)
+    if (rect.width > 0 && rect.width < 40 && rect.height > 0 && rect.height < 30) {
+      const num = parseInt(text.replace('+', ''))
+      if (!isNaN(num) && num > 0) {
+        totalUnread += num
+      }
+    }
+  }
+
+  // === CHIẾN THUẬT 2: Tìm các chấm tròn đỏ/cam nhỏ (visual unread dot) ===
+  if (totalUnread === 0) {
+    const allSpans = document.querySelectorAll('span, div')
+    for (const el of Array.from(allSpans)) {
+      const s = window.getComputedStyle(el)
+      const rect = (el as HTMLElement).getBoundingClientRect()
+      const bg = s.backgroundColor
+      const text = (el as HTMLElement).textContent?.trim() || ''
+      // Tìm phần tử nhỏ, tròn, màu đỏ/cam, có chứa số
+      if (
+        rect.width >= 14 && rect.width <= 32 &&
+        rect.height >= 14 && rect.height <= 32 &&
+        (bg.includes('255') || bg.includes('233') || bg.includes('244')) && // đỏ/cam
+        /^\d+\+?$/.test(text)
+      ) {
+        const num = parseInt(text.replace('+', ''))
+        if (!isNaN(num) && num > 0) {
+          totalUnread += num
+        }
+      }
+    }
+  }
+
+  // === CHIẾN THUẬT 3: Fallback từ tiêu đề trang ===
+  const titleMatch = document.title.match(/\((\d+)\)/)
+  if (titleMatch) {
+    const titleCount = parseInt(titleMatch[1]) || 0
+    if (titleCount > totalUnread) {
+      totalUnread = titleCount
+    }
+  }
+
+  return totalUnread
+}
+
 window.addEventListener('load', () => {
   // Initial avatar scrape
   setTimeout(scrapeAccountInfo, 4000)
@@ -115,14 +183,19 @@ window.addEventListener('load', () => {
         lastTitle = newTitle
         const m = newTitle.match(/\((\d+)\)/)
         const count = m ? parseInt(m[1]) || 0 : 0
-        ipcRenderer.sendToHost('zalo-data', {
-          type: 'global-unread',
-          data: count
-        })
+        reportUnread(count)
       }
     })
     titleObs.observe(titleEl, { childList: true, characterData: true, subtree: true })
   }
+
+  // DOM Scanner — quét DOM mỗi 3 giây để đếm unread (backup cho title observer)
+  setTimeout(() => {
+    setInterval(() => {
+      const count = scanDomForUnread()
+      reportUnread(count)
+    }, 3000)
+  }, 5000) // Chờ 5s cho trang load xong
 })
 
 // ============================================================================

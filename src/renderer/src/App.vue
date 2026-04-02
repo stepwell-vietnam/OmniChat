@@ -121,31 +121,31 @@ onMounted(async () => {
   // Load accounts
   try {
     const saved = await db.accounts.toArray()
-    if (saved.length > 0) {
-      accounts.value = saved.map(a => ({ ...a, platform: (a as any).platform || 'zalo', unread: 0 } as Account))
-    } else {
-      // IndexedDB trống — thử khôi phục từ backup JSON trên ổ cứng
-      let restored = false
-      try {
-        const backupJson = await window.api.loadAccountsBackup()
-        if (backupJson) {
-          const backupAccounts = JSON.parse(backupJson) as any[]
-          if (backupAccounts.length > 0) {
-            accounts.value = backupAccounts.map(a => ({ ...a, platform: a.platform || 'zalo', unread: 0 } as Account))
-            // Ghi lại vào IndexedDB
-            for (const acc of accounts.value) {
-              const { unread: _, ...dbAcc } = acc
-              await db.accounts.put(dbAcc)
-            }
-            restored = true
-            console.log('OmniChat: ✅ Khôi phục thành công', backupAccounts.length, 'tài khoản từ backup!')
-          }
-        }
-      } catch (e) {
-        console.warn('OmniChat: Không thể đọc backup accounts:', e)
-      }
+    let shouldRestore = saved.length === 0
 
-      if (!restored) {
+    // Kiểm tra xem có đang ở trạng thái mặc định (chỉ có Zalo 1, Zalo 2) không
+    const isDefaultState = saved.length <= 2 && saved.every(a => a.name.startsWith('Zalo '))
+    
+    let backupAccounts: any[] = []
+    try {
+      const backupJson = await window.api.loadAccountsBackup()
+      if (backupJson) {
+        backupAccounts = JSON.parse(backupJson) as any[]
+      }
+    } catch(e) {}
+
+    // Nếu đang rỗng hoặc đang ở trạng thái mặc định mà đĩa lại có nhiều tài khoản hơn -> Khôi phục
+    if (shouldRestore || (isDefaultState && backupAccounts.length > saved.length)) {
+      if (backupAccounts.length > 0) {
+        accounts.value = backupAccounts.map(a => ({ ...a, platform: a.platform || 'zalo', unread: 0 } as Account))
+        await db.accounts.clear() // Xóa sạch dữ liệu mặc định cũ
+        for (const acc of accounts.value) {
+          const { unread: _, ...dbAcc } = acc
+          await db.accounts.put(dbAcc)
+        }
+        console.log('OmniChat: ✅ Khôi phục đè thành công', backupAccounts.length, 'tài khoản từ backup!')
+      } else {
+        // Backup cũng rỗng -> Tạo mặc định
         const defaults: Account[] = [
           { id: '1', name: 'Zalo 1', platform: 'zalo', color: 'bg-blue-600', isHidden: false, unread: 0 },
           { id: '2', name: 'Zalo 2', platform: 'zalo', color: 'bg-green-600', isHidden: false, unread: 0 }
@@ -156,6 +156,9 @@ onMounted(async () => {
           await db.accounts.put(dbAcc)
         }
       }
+    } else {
+      // Load bình thường từ IndexedDB
+      accounts.value = saved.map(a => ({ ...a, platform: (a as any).platform || 'zalo', unread: 0 } as Account))
     }
   } catch (e) {
     console.error('OmniChat: Error loading accounts', e)
