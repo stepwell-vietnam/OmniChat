@@ -29,11 +29,12 @@ export interface DbCustomerNote {
   updatedAt: number
 }
 
-/** Mẫu trả lời nhanh (Phase 2) */
+/** Mẫu trả lời nhanh — ảnh lưu dạng file trên ổ cứng */
 export interface DbQuickReply {
   id?: number
   shortcut: string
   content: string
+  imagePaths?: string[]
   createdAt: number
 }
 

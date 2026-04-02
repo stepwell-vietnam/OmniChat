@@ -17,6 +17,12 @@ declare global {
       }>
       deleteOldStorage: () => Promise<{ success: boolean; error?: string }>
       dismissMigration: () => Promise<{ success: boolean }>
+      // Snippet Image APIs
+      saveSnippetImages: (snippetId: number, base64Images: string[]) => Promise<string[]>
+      deleteSnippetImages: (filePaths: string[]) => Promise<boolean>
+      pasteImagesToWebview: (webContentsId: number, filePaths: string[]) => Promise<boolean>
+      // Snippet Relay
+      saveSnippetsCache: (data: string) => Promise<boolean>
     }
   }
 }

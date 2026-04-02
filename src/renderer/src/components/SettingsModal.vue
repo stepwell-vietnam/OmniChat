@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import type { Account, Platform } from '../types'
 import { PLATFORMS } from '../types'
 import { getInitials } from '../utils'
+import type { DbQuickReply } from '../database/db'
 
 const props = defineProps<{
   show: boolean
@@ -10,6 +11,7 @@ const props = defineProps<{
   soundEnabled: boolean
   notificationEnabled: boolean
   storagePath: string
+  snippets: DbQuickReply[]
 }>()
 
 const emit = defineEmits<{
@@ -22,6 +24,9 @@ const emit = defineEmits<{
   'update:notificationEnabled': [val: boolean]
   changeStoragePath: []
   restartApp: []
+  addSnippet: [shortcut: string, content: string, formImages?: string[]]
+  deleteSnippet: [id: number]
+  updateSnippet: [id: number, shortcut: string, content: string, formImages?: string[]]
 }>()
 
 const needsRestart = ref(false)
@@ -65,7 +70,72 @@ const handleRestart = () => {
 }
 
 // Active tab
-const activeSection = ref<'accounts' | 'system'>('accounts')
+const activeSection = ref<'accounts' | 'system' | 'snippets'>('accounts')
+
+// Snippet State
+const snippetForm = ref({ shortcut: '', content: '', images: [] as string[] })
+const isEditingSnippetId = ref<number | null>(null)
+
+const handleSaveSnippet = () => {
+  if (!snippetForm.value.shortcut || (!snippetForm.value.content && snippetForm.value.images.length === 0)) return
+  const cleanShortcut = snippetForm.value.shortcut.trim()
+  if (isEditingSnippetId.value) {
+    emit('updateSnippet', isEditingSnippetId.value, cleanShortcut, snippetForm.value.content, snippetForm.value.images)
+    isEditingSnippetId.value = null
+  } else {
+    emit('addSnippet', cleanShortcut, snippetForm.value.content, snippetForm.value.images)
+  }
+  snippetForm.value.shortcut = ''
+  snippetForm.value.content = ''
+  snippetForm.value.images = []
+}
+
+const handleEditSnippet = (snippet: DbQuickReply) => {
+  isEditingSnippetId.value = snippet.id!
+  snippetForm.value.shortcut = snippet.shortcut
+  snippetForm.value.content = snippet.content
+  // Load ảnh cũ từ file paths → truyền qua tham số path để không bị URL parser làm hỏng (đổi chữ hoa thành thường ở phần Users)
+  snippetForm.value.images = (snippet.imagePaths || []).map(p => 'local-img://asset?path=' + encodeURIComponent(p))
+}
+
+const handleCancelEdit = () => {
+  isEditingSnippetId.value = null
+  snippetForm.value.shortcut = ''
+  snippetForm.value.content = ''
+  snippetForm.value.images = []
+}
+
+const handleSnippetImageUpload = async (event: Event) => {
+  const input = event.target as HTMLInputElement
+  if (!input.files || input.files.length === 0) return
+  
+  if (snippetForm.value.images.length + input.files.length > 6) {
+     alert("Chỉ được lưu tối đa 6 ảnh cho mỗi mẫu tin nhắn.")
+     return
+  }
+
+  const files = Array.from(input.files)
+  
+  const promises = files.map(file => {
+    return new Promise<string>((resolve) => {
+      const reader = new FileReader()
+      reader.onload = (e) => {
+        if (e.target?.result) resolve(e.target.result as string)
+      }
+      reader.readAsDataURL(file)
+    })
+  })
+  
+  const base64Images = await Promise.all(promises)
+  snippetForm.value.images.push(...base64Images)
+  
+  // reset input
+  input.value = ''
+}
+
+const handleRemoveSnippetImage = (index: number) => {
+  snippetForm.value.images.splice(index, 1)
+}
 </script>
 
 <template>
@@ -100,6 +170,16 @@ const activeSection = ref<'accounts' | 'system'>('accounts')
           <span class="flex items-center gap-1.5">
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
             Hệ thống
+          </span>
+        </button>
+        <button
+          class="px-4 py-3 text-sm font-semibold transition border-b-2"
+          :class="activeSection === 'snippets' ? 'border-zalo-primary text-zalo-primary' : 'border-transparent text-gray-500 hover:text-gray-700'"
+          @click="activeSection = 'snippets'"
+        >
+          <span class="flex items-center gap-1.5">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+            Tin nhắn mẫu
           </span>
         </button>
       </div>
@@ -288,6 +368,100 @@ const activeSection = ref<'accounts' | 'system'>('accounts')
             </div>
           </div>
 
+        </div>
+
+        <!-- ===== TAB 3: TIN NHẮN MẪU (SNIPPETS) ===== -->
+        <div v-if="activeSection === 'snippets'" class="space-y-6">
+          
+          <h2 class="text-lg font-bold text-gray-800">{{ isEditingSnippetId ? 'Sửa tin nhắn nhanh' : 'Tạo tin nhắn nhanh' }}</h2>
+
+          <!-- Form Thêm Mới Chuẩn Zalo -->
+          <div class="border border-gray-300 rounded-lg bg-white overflow-hidden shadow-sm">
+            <!-- Header: Phím tắt -->
+            <div class="flex items-center gap-2 border-b border-gray-300 px-3 py-2 bg-white">
+              <div class="bg-gray-200 text-gray-600 font-bold px-3 py-1 rounded text-sm select-none">\</div>
+              <input type="text" v-model="snippetForm.shortcut" class="flex-1 bg-transparent border-none outline-none text-sm py-1 font-mono text-gray-700" placeholder="Phím tắt (Ví dụ: xinchao)" maxlength="20" @keyup.enter="handleSaveSnippet">
+              <span class="text-xs text-gray-400 font-mono">{{ snippetForm.shortcut.length }}/20</span>
+            </div>
+            
+            <!-- Body: Nội dung -->
+            <div class="p-0 border-b border-gray-200">
+              <textarea v-model="snippetForm.content" class="w-full bg-transparent border-none outline-none text-sm p-4 resize-none h-32 text-gray-800 placeholder-gray-400 leading-relaxed" placeholder="Nhập nội dung tin nhắn"></textarea>
+            </div>
+            
+            <!-- Footer: Hình ảnh & Actions -->
+            <div class="flex flex-col gap-3 p-3 bg-white border-t border-gray-100">
+              
+              <!-- Image Previews Horizontal list -->
+              <div v-if="snippetForm.images.length > 0" class="flex flex-wrap gap-2 px-1">
+                <div v-for="(img, idx) in snippetForm.images" :key="idx" class="relative group">
+                  <img :src="img" class="h-16 w-16 object-cover rounded border border-gray-200 shadow-sm">
+                  <button @click="handleRemoveSnippetImage(idx)" class="absolute -top-1.5 -right-1.5 bg-red-500 hover:bg-red-600 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition shadow" title="Xóa ảnh">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                  </button>
+                </div>
+              </div>
+
+              <div class="flex justify-between items-center mt-1">
+                <!-- Nút Thêm Ảnh -->
+                <div class="flex items-center gap-3">
+                  <button v-if="snippetForm.images.length < 6" class="px-3.5 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold rounded-full flex items-center gap-1.5 transition" @click="$refs.snippetImageInput && ($refs.snippetImageInput as any).click()">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
+                    Thêm ảnh {{ snippetForm.images.length > 0 ? `(${snippetForm.images.length}/6)` : '' }}
+                  </button>
+                  <input type="file" ref="snippetImageInput" class="hidden" accept="image/*" multiple @change="handleSnippetImageUpload">
+                </div>
+
+                <!-- Buttons Hủy / Thêm -->
+                <div class="flex gap-2">
+                  <button @click="handleCancelEdit" class="px-5 py-2 bg-gray-200 hover:bg-gray-300 text-gray-800 rounded font-semibold text-sm transition">Hủy</button>
+                  <button @click="handleSaveSnippet" :disabled="!snippetForm.shortcut || (!snippetForm.content && snippetForm.images.length === 0)" class="px-5 py-2 bg-blue-400 hover:bg-blue-500 text-white rounded font-bold text-sm transition disabled:opacity-50 disabled:cursor-not-allowed">
+                    {{ isEditingSnippetId ? 'Lưu' : 'Thêm' }}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Danh sách Mẫu -->
+          <div class="border rounded-lg overflow-hidden border-gray-200">
+            <div class="bg-gray-50 px-4 py-3 border-b border-gray-200 flex justify-between items-center">
+              <h3 class="text-sm font-bold text-gray-700 flex items-center gap-2">
+                Kho lưu trữ mẫu ({{ snippets.length }})
+              </h3>
+            </div>
+            <div class="bg-white">
+              <div v-if="snippets.length === 0" class="p-8 text-center flex flex-col items-center justify-center border-t border-gray-50">
+                 <div class="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-3">
+                   <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="text-gray-400"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+                 </div>
+                 <p class="text-sm font-semibold text-gray-600">Trống</p>
+                 <p class="text-xs text-gray-400 mt-1 max-w-[250px]">Chưa có mẫu nào. Hãy thêm một mẫu mới ở trên để tăng tốc độ trả lời khách hàng nhé.</p>
+              </div>
+              <ul v-else class="divide-y divide-gray-100 max-h-[260px] overflow-y-auto">
+                <li v-for="snip in snippets" :key="snip.id" class="p-3.5 hover:bg-blue-50/30 transition flex items-start gap-4">
+                  <div class="text-sm font-mono font-bold text-gray-700 bg-gray-100 border border-gray-200 shadow-inner px-2 py-1 rounded w-20 flex-shrink-0 text-center select-all flex items-center justify-center gap-0.5">
+                    <span class="text-gray-400 font-normal">\</span>{{ snip.shortcut }}
+                  </div>
+                  <div class="flex-1 min-w-0 pt-0.5">
+                    <p v-if="snip.content" class="text-sm text-gray-700 whitespace-pre-wrap break-words line-clamp-3 leading-relaxed opacity-90" :title="snip.content">{{ snip.content }}</p>
+                    <div v-if="snip.imagePaths && snip.imagePaths.length > 0" class="mt-1 flex items-center gap-1.5 text-xs text-blue-500 font-semibold">
+                      <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
+                      Đính kèm {{ snip.imagePaths.length }} ảnh
+                    </div>
+                  </div>
+                  <div class="flex flex-col gap-1 items-center">
+                    <button @click="handleEditSnippet(snip)" class="p-1.5 text-blue-500 bg-white border border-blue-100 hover:bg-blue-50 hover:border-blue-200 rounded-md transition shadow-sm" title="Sửa">
+                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+                    </button>
+                    <button @click="emit('deleteSnippet', snip.id!)" class="p-1.5 text-red-500 bg-white border border-red-100 hover:bg-red-50 hover:border-red-200 rounded-md transition shadow-sm" title="Xóa">
+                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                    </button>
+                  </div>
+                </li>
+              </ul>
+            </div>
+          </div>
         </div>
       </div>
 

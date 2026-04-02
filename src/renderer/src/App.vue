@@ -3,6 +3,7 @@ import { ref, watch, onMounted, computed } from 'vue'
 import type { Account, Platform } from './types'
 import { PLATFORMS } from './types'
 import { db, getSetting, setSetting } from './database/db'
+import type { DbQuickReply } from './database/db'
 import { useNotifications } from './composables/useNotifications'
 import AccountSidebar from './components/AccountSidebar.vue'
 import SettingsModal from './components/SettingsModal.vue'
@@ -15,6 +16,7 @@ const showSettings = ref(false)
 const accounts = ref<Account[]>([])
 const webviewPreloadPath = ref(window.api?.getWebviewPreloadPath?.() || '')
 const hasNewMessage = ref<Record<string, boolean>>({})
+const snippets = ref<DbQuickReply[]>([])
 
 // ===== SETTINGS =====
 const soundEnabled = ref(true)
@@ -62,6 +64,25 @@ onMounted(async () => {
     storagePath.value = await window.api.getStoragePath()
   } catch (e) {
     storagePath.value = ''
+  }
+
+  // Load snippets
+  try {
+    snippets.value = await db.quickReplies.toArray()
+    // Tạo mẫu mặc định nếu chưa có snippet nào
+    if (snippets.value.length === 0) {
+      const defaultSnippet = {
+        shortcut: 'xinchao',
+        content: 'Đây là nội dung tin nhắn mẫu. Tin nhắn sẽ được đính kèm tối đa 6 hình ảnh. Khi gửi phần text sẽ gửi trước và hình ảnh gửi sau.',
+        imagePaths: [] as string[],
+        createdAt: Date.now()
+      }
+      const id = await db.quickReplies.add(defaultSnippet) as number
+      snippets.value.push({ id, ...defaultSnippet })
+    }
+    syncSnippetsToWebviews()
+  } catch (e) {
+    console.error('OmniChat: Error loading snippets', e)
   }
 
   // Check migration
@@ -167,6 +188,101 @@ const handleRefreshWebview = () => {
   if (wv?.reload) wv.reload()
 }
 
+// Sync snippets qua Main Process relay (kênh IPC đã proven hoạt động)
+const syncSnippetsToWebviews = () => {
+  const metadata = snippets.value.map(s => ({
+    id: s.id,
+    shortcut: s.shortcut,
+    content: s.content,
+    imageCount: (s.imagePaths || []).length
+  }))
+  window.api.saveSnippetsCache(JSON.stringify(metadata))
+}
+
+// ===== SNIPPETS MANAGEMENT =====
+const handleAddSnippet = async (shortcut: string, content: string, base64Images?: string[]) => {
+  // Validate trùng shortcut
+  if (snippets.value.some(s => s.shortcut.toLowerCase() === shortcut.toLowerCase())) {
+    alert(`Phím tắt "\\${shortcut}" đã tồn tại. Vui lòng chọn phím tắt khác.`)
+    return
+  }
+
+  const payload = { shortcut, content, imagePaths: [] as string[], createdAt: Date.now() }
+  const id = await db.quickReplies.add(payload) as number
+
+  // Lưu ảnh ra file nếu có
+  if (base64Images && base64Images.length > 0) {
+    const paths = await window.api.saveSnippetImages(id, base64Images)
+    payload.imagePaths = paths
+    await db.quickReplies.update(id, { imagePaths: paths })
+  }
+
+  snippets.value.push({ id, ...payload })
+  syncSnippetsToWebviews()
+}
+
+const handleUpdateSnippet = async (id: number, shortcut: string, content: string, formImages?: string[]) => {
+  // Validate trùng shortcut (trừ chính nó)
+  if (snippets.value.some(s => s.id !== id && s.shortcut.toLowerCase() === shortcut.toLowerCase())) {
+    alert(`Phím tắt "\\${shortcut}" đã tồn tại. Vui lòng chọn phím tắt khác.`)
+    return
+  }
+
+  const existing = snippets.value.find(s => s.id === id)
+  const oldPaths = existing?.imagePaths || []
+
+  // Phân tách: ảnh cũ (file://) vs ảnh mới (base64)
+  const keptPaths: string[] = []
+  const newBase64: string[] = []
+  for (const img of (formImages || [])) {
+    if (img.startsWith('data:image/')) {
+      newBase64.push(img)
+    } else if (img.startsWith('local-img://')) {
+      try {
+        const urlObj = new URL(img)
+        keptPaths.push(urlObj.searchParams.get('path') || img.replace('local-img://', ''))
+      } catch (e) {
+        keptPaths.push(img.replace('local-img://', ''))
+      }
+    } else if (img.startsWith('file://')) {
+      keptPaths.push(img.replace('file://', ''))
+    }
+  }
+
+  // Xóa các file ảnh cũ mà user đã bỏ
+  const deletedPaths = oldPaths.filter(p => !keptPaths.includes(p))
+  if (deletedPaths.length > 0) {
+    await window.api.deleteSnippetImages(deletedPaths)
+  }
+
+  // Lưu ảnh mới ra file
+  let newPaths: string[] = []
+  if (newBase64.length > 0) {
+    newPaths = await window.api.saveSnippetImages(id, newBase64)
+  }
+
+  const finalPaths = [...keptPaths, ...newPaths]
+  await db.quickReplies.update(id, { shortcut, content, imagePaths: finalPaths })
+
+  const index = snippets.value.findIndex(s => s.id === id)
+  if (index !== -1) {
+    snippets.value[index].shortcut = shortcut
+    snippets.value[index].content = content
+    snippets.value[index].imagePaths = finalPaths
+  }
+  syncSnippetsToWebviews()
+}
+
+const handleDeleteSnippet = async (id: number) => {
+  const existing = snippets.value.find(s => s.id === id)
+  if (existing?.imagePaths && existing.imagePaths.length > 0) {
+    await window.api.deleteSnippetImages(existing.imagePaths)
+  }
+  await db.quickReplies.delete(id)
+  snippets.value = snippets.value.filter(s => s.id !== id)
+  syncSnippetsToWebviews()
+}
+
 // ===== IPC HANDLING =====
 const handleIpcMessage = (event: any, acc: Account) => {
   if (event.channel !== 'zalo-data') return
@@ -194,6 +310,24 @@ const handleIpcMessage = (event: any, acc: Account) => {
         body: payload.data.body || payload.data.title || 'Tin nhan moi!',
         icon: icon
       })
+    }
+
+  } else if (payload.type === 'snippet-paste-images') {
+    console.log('[App.vue] Nhận yêu cầu paste ảnh từ webview! snippetId:', payload.data?.snippetId)
+    const snippetId = payload.data?.snippetId
+    const snippet = snippets.value.find(s => s.id === snippetId)
+    console.log('[App.vue] Tìm snippet:', snippet ? `OK (${snippet.imagePaths?.length} ảnh)` : 'KHÔNG TÌM THẤY')
+    if (snippet?.imagePaths && snippet.imagePaths.length > 0) {
+      const wv = document.getElementById('webview_' + acc.id) as any
+      console.log('[App.vue] Webview element:', wv ? 'OK' : 'NOT FOUND', 'getWebContentsId:', !!wv?.getWebContentsId)
+      if (wv?.getWebContentsId) {
+        const wcId = wv.getWebContentsId()
+        const plainPaths = [...snippet.imagePaths!] // Convert Vue Proxy → plain array cho IPC
+        console.log('[App.vue] Gọi pasteImagesToWebview — wcId:', wcId, 'paths:', plainPaths)
+        setTimeout(() => {
+          window.api.pasteImagesToWebview(wcId, plainPaths)
+        }, 300)
+      }
     }
   }
 }
@@ -281,6 +415,7 @@ const handleDismissMigration = async () => {
         :sound-enabled="soundEnabled"
         :notification-enabled="notificationEnabled"
         :storage-path="storagePath"
+        :snippets="snippets"
         @close="showSettings = false"
         @add-account="handleAddAccount"
         @toggle-visibility="handleToggleVisibility"
@@ -288,6 +423,9 @@ const handleDismissMigration = async () => {
         @upload-avatar="handleUploadAvatar"
         @update:sound-enabled="(val) => soundEnabled = val"
         @update:notification-enabled="(val) => notificationEnabled = val"
+        @add-snippet="handleAddSnippet"
+        @update-snippet="handleUpdateSnippet"
+        @delete-snippet="handleDeleteSnippet"
       />
     </div>
   </div>

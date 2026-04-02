@@ -21,7 +21,19 @@ const api = {
   }> => ipcRenderer.invoke('get-migration-status'),
   deleteOldStorage: (): Promise<{ success: boolean; error?: string }> =>
     ipcRenderer.invoke('delete-old-storage'),
-  dismissMigration: (): Promise<{ success: boolean }> => ipcRenderer.invoke('dismiss-migration')
+  dismissMigration: (): Promise<{ success: boolean }> => ipcRenderer.invoke('dismiss-migration'),
+
+  // ===== Snippet Image APIs =====
+  saveSnippetImages: (snippetId: number, base64Images: string[]): Promise<string[]> =>
+    ipcRenderer.invoke('save-snippet-images', snippetId, base64Images),
+  deleteSnippetImages: (filePaths: string[]): Promise<boolean> =>
+    ipcRenderer.invoke('delete-snippet-images', filePaths),
+  pasteImagesToWebview: (webContentsId: number, filePaths: string[]): Promise<boolean> =>
+    ipcRenderer.invoke('paste-images-to-webview', webContentsId, filePaths),
+
+  // ===== Snippet Relay =====
+  saveSnippetsCache: (data: string): Promise<boolean> =>
+    ipcRenderer.invoke('save-snippets-cache', data)
 }
 
 // Use `contextBridge` APIs to expose Electron APIs to

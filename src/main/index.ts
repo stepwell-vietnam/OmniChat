@@ -1,7 +1,13 @@
-import { app, shell, BrowserWindow, ipcMain, dialog } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, dialog, webContents, protocol, clipboard, nativeImage } from 'electron'
 import { join } from 'path'
 import icon from '../../resources/icon.png?asset'
 import fs from 'fs'
+
+// Đăng ký quyền ưu tiên cho custom protocol để tránh lỗi CORS và sai lệch path
+protocol.registerSchemesAsPrivileged([{
+  scheme: 'local-img',
+  privileges: { bypassCSP: true, standard: true, supportFetchAPI: true, secure: true }
+}])
 
 // ===== CONFIG: Đọc đường dẫn lưu trữ từ file cấu hình =====
 // Config file lưu ở %APPDATA%/OmniChat (luôn trên ổ C, nhỏ gọn < 1KB)
@@ -186,6 +192,43 @@ function createWindow(): void {
 app.whenReady().then(() => {
   app.setAppUserModelId('com.stepwell.omnichat')
 
+  // Đăng ký custom protocol để renderer có thể tải ảnh local (bypass web security)
+  protocol.handle('local-img', async (request) => {
+    try {
+      console.log('[Protocol local-img] Yêu cầu URL:', request.url)
+      
+      // Dùng regex đơn giản để extract path — không dùng new URL() vì Chromium parse sai
+      const pathMatch = request.url.match(/[?&]path=([^&]+)/)
+      let filePath: string
+      
+      if (pathMatch) {
+        filePath = decodeURIComponent(pathMatch[1])
+      } else {
+        filePath = decodeURIComponent(request.url.replace(/^local-img:\/\//i, ''))
+      }
+
+      if (process.platform === 'win32' && filePath.startsWith('/')) {
+        filePath = filePath.substring(1)
+      }
+
+      console.log('[Protocol local-img] Đường dẫn vật lý:', filePath)
+
+      if (fs.existsSync(filePath)) {
+        const data = await fs.promises.readFile(filePath)
+        const ext = filePath.split('.').pop()?.toLowerCase() || 'png'
+        const mime = ext === 'jpg' ? 'image/jpeg' : `image/${ext}`
+        console.log('[Protocol local-img] Tải ảnh thành công!')
+        return new Response(data, { headers: { 'Content-Type': mime } })
+      } else {
+        console.error('[Protocol local-img] KHÔNG TÌM THẤY ẢNH:', filePath)
+        return new Response('Not Found', { status: 404 })
+      }
+    } catch (err) {
+      console.error('[Protocol local-img] LỖI:', err)
+      return new Response('Error', { status: 500 })
+    }
+  })
+
   // ===== IPC: Storage Path =====
   ipcMain.handle('get-storage-path', () => {
     return app.getPath('userData')
@@ -369,6 +412,93 @@ app.whenReady().then(() => {
   ipcMain.handle('restart-app', () => {
     app.relaunch()
     app.exit(0)
+  })
+
+  // ===== IPC: Snippet Images — Lưu base64 thành file trên ổ cứng =====
+  ipcMain.handle('save-snippet-images', async (_e, snippetId: number, base64Images: string[]) => {
+    const dir = join(app.getPath('userData'), 'snippet-images')
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
+
+    const paths: string[] = []
+    for (let i = 0; i < base64Images.length; i++) {
+      const match = base64Images[i].match(/^data:image\/(\w+);base64,(.+)$/)
+      if (!match) continue
+      const ext = match[1] === 'jpeg' ? 'jpg' : match[1]
+      const buffer = Buffer.from(match[2], 'base64')
+      const filename = `snippet_${snippetId}_${Date.now()}_${i}.${ext}`
+      const filePath = join(dir, filename)
+      fs.writeFileSync(filePath, buffer)
+      paths.push(filePath)
+    }
+    return paths
+  })
+
+  // ===== IPC: Snippet Images — Xóa file ảnh khỏi ổ cứng =====
+  ipcMain.handle('delete-snippet-images', async (_e, filePaths: string[]) => {
+    for (const p of filePaths) {
+      try { if (fs.existsSync(p)) fs.unlinkSync(p) } catch { /* skip */ }
+    }
+    return true
+  })
+
+// ===== IPC: Paste ảnh vào webview qua OS Clipboard (đáng tin cậy nhất) =====
+  ipcMain.handle('paste-images-to-webview', async (_e, wcId: number, filePaths: string[]) => {
+    const wc = webContents.fromId(wcId)
+    if (!wc) {
+      console.error(`[Main] Không tìm thấy WebContents với ID ${wcId}`)
+      return false
+    }
+
+    console.log(`[Main] Bắt đầu paste ${filePaths.length} ảnh vào webview (ID: ${wcId})`)
+
+    // Focus vào ô nhập liệu trong webview trước
+    try {
+      await wc.executeJavaScript(`
+        const el = document.activeElement || document.querySelector('[contenteditable="true"]');
+        if (el) el.focus();
+      `)
+    } catch (err) {
+      console.warn('[Main] Không thể focus input:', err)
+    }
+
+    await new Promise(resolve => setTimeout(resolve, 200))
+
+    for (const filePath of filePaths) {
+      try {
+        if (!fs.existsSync(filePath)) {
+          console.error(`[Main] ❌ FILE KHÔNG TỒN TẠI: ${filePath}`)
+          continue
+        }
+        const image = nativeImage.createFromPath(filePath)
+        if (image.isEmpty()) {
+          console.error(`[Main] ❌ Ảnh rỗng: ${filePath}`)
+          continue
+        }
+
+        // Ghi ảnh vào OS clipboard
+        clipboard.writeImage(image)
+        
+        // Gọi paste trực tiếp trên webContents
+        wc.paste()
+        console.log(`[Main] ✔ Đã paste: ${filePath}`)
+        
+        // Chờ 800ms giữa mỗi ảnh để Zalo kịp xử lý
+        await new Promise(resolve => setTimeout(resolve, 800))
+      } catch (err) {
+        console.error('[Main] Lỗi paste ảnh:', err)
+      }
+    }
+    return true
+  })
+
+  // ===== IPC: Snippet Relay (Main Process as bridge) =====
+  let snippetsCacheStore = '[]'
+  ipcMain.handle('save-snippets-cache', (_e, data: string) => {
+    snippetsCacheStore = data
+    return true
+  })
+  ipcMain.on('get-snippets-sync', (event) => {
+    event.returnValue = snippetsCacheStore
   })
 
   // IPC Handlers
