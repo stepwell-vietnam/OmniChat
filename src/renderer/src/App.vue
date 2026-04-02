@@ -21,6 +21,7 @@ const snippets = ref<DbQuickReply[]>([])
 // ===== SETTINGS =====
 const soundEnabled = ref(true)
 const notificationEnabled = ref(true)
+const autoUpdateEnabled = ref(true)
 const storagePath = ref('')
 
 // ===== MIGRATION =====
@@ -53,8 +54,10 @@ onMounted(async () => {
   try {
     const sound = await getSetting('soundEnabled', 'true')
     const notif = await getSetting('notificationEnabled', 'true')
+    const autoUp = await getSetting('autoUpdateEnabled', 'true')
     soundEnabled.value = sound === 'true'
     notificationEnabled.value = notif === 'true'
+    autoUpdateEnabled.value = autoUp === 'true'
   } catch (e) {
     console.error('OmniChat: Error loading settings', e)
   }
@@ -137,6 +140,7 @@ watch(accounts, async (val) => {
 // Persist settings
 watch(soundEnabled, async (val) => { await setSetting('soundEnabled', String(val)) })
 watch(notificationEnabled, async (val) => { await setSetting('notificationEnabled', String(val)) })
+watch(autoUpdateEnabled, async (val) => { await setSetting('autoUpdateEnabled', String(val)) })
 
 // Watch unread count changes -> bell icon
 watchUnreadChanges(accounts, unreadCounts, (accId: string) => {
@@ -351,7 +355,7 @@ const handleDismissMigration = async () => {
 <template>
   <div class="flex flex-col h-screen w-screen bg-zalo-bg text-zalo-text overflow-hidden">
 
-    <AutoUpdateBanner />
+    <AutoUpdateBanner :enabled="autoUpdateEnabled" />
 
     <MigrationBanner
       :show="showMigrationBanner"
@@ -414,6 +418,7 @@ const handleDismissMigration = async () => {
         :accounts="accounts"
         :sound-enabled="soundEnabled"
         :notification-enabled="notificationEnabled"
+        :auto-update-enabled="autoUpdateEnabled"
         :storage-path="storagePath"
         :snippets="snippets"
         @close="showSettings = false"
@@ -423,6 +428,7 @@ const handleDismissMigration = async () => {
         @upload-avatar="handleUploadAvatar"
         @update:sound-enabled="(val) => soundEnabled = val"
         @update:notification-enabled="(val) => notificationEnabled = val"
+        @update:auto-update-enabled="(val) => autoUpdateEnabled = val"
         @add-snippet="handleAddSnippet"
         @update-snippet="handleUpdateSnippet"
         @delete-snippet="handleDeleteSnippet"

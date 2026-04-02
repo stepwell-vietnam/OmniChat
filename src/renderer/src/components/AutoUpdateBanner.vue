@@ -1,7 +1,11 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 
 const CURRENT_VERSION = 1.3 // Số phiên bản hiện hành
+
+const props = defineProps<{
+  enabled: boolean
+}>()
 
 const hasUpdate = ref(false)
 const updateInfo = ref({
@@ -13,15 +17,13 @@ const updateInfo = ref({
 
 const isDismissed = ref(false)
 
-onMounted(async () => {
+const checkForUpdate = async () => {
   try {
-    // Sử dụng link RAW của Gitlab dự án Stepwell OmniChat (đã check: đang Public)
     const response = await fetch('https://gitlab.com/stepwellvietnam/chatportal/-/raw/main/version.json', { cache: 'no-store' })
     if (response.ok) {
       const data = await response.json()
       const remoteVersion = parseFloat(data.version)
       
-      // So sánh phiên bản (VD: 1.3 > 1.2)
       if (remoteVersion > CURRENT_VERSION) {
         updateInfo.value = data
         hasUpdate.value = true
@@ -30,6 +32,15 @@ onMounted(async () => {
   } catch (error) {
     console.log('OmniChat: Không tìm thấy bản cập nhật mới.')
   }
+}
+
+onMounted(() => {
+  if (props.enabled) checkForUpdate()
+})
+
+// Khi user bật lại setting -> kiểm tra ngay
+watch(() => props.enabled, (val) => {
+  if (val && !hasUpdate.value) checkForUpdate()
 })
 
 const dismiss = () => {

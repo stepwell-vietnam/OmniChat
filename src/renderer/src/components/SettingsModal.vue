@@ -10,6 +10,7 @@ const props = defineProps<{
   accounts: Account[]
   soundEnabled: boolean
   notificationEnabled: boolean
+  autoUpdateEnabled: boolean
   storagePath: string
   snippets: DbQuickReply[]
 }>()
@@ -22,6 +23,7 @@ const emit = defineEmits<{
   uploadAvatar: [id: string, data: string]
   'update:soundEnabled': [val: boolean]
   'update:notificationEnabled': [val: boolean]
+  'update:autoUpdateEnabled': [val: boolean]
   changeStoragePath: []
   restartApp: []
   addSnippet: [shortcut: string, content: string, formImages?: string[]]
@@ -245,18 +247,26 @@ const handleRemoveSnippetImage = (index: number) => {
           </div>
 
           <!-- Add Account Buttons -->
-          <div class="flex gap-3">
-            <button @click="emit('addAccount', 'zalo')" class="flex-1 py-3 border-2 border-dashed border-blue-200 rounded-lg text-blue-600 font-bold hover:border-blue-500 hover:bg-blue-50 transition flex justify-center items-center gap-2 focus:outline-none">
+          <div class="grid grid-cols-2 gap-3">
+            <button @click="emit('addAccount', 'zalo')" class="py-3 border-2 border-dashed border-blue-200 rounded-lg text-blue-600 font-bold hover:border-blue-500 hover:bg-blue-50 transition flex justify-center items-center gap-2 focus:outline-none">
               <span class="w-6 h-6 bg-blue-600 text-white rounded-full flex items-center justify-center text-xs font-bold">Z</span>
               Zalo
             </button>
-            <button @click="emit('addAccount', 'whatsapp')" class="flex-1 py-3 border-2 border-dashed border-green-200 rounded-lg text-green-600 font-bold hover:border-green-500 hover:bg-green-50 transition flex justify-center items-center gap-2 focus:outline-none">
+            <button @click="emit('addAccount', 'whatsapp')" class="py-3 border-2 border-dashed border-green-200 rounded-lg text-green-600 font-bold hover:border-green-500 hover:bg-green-50 transition flex justify-center items-center gap-2 focus:outline-none">
               <span class="w-6 h-6 bg-green-600 text-white rounded-full flex items-center justify-center text-xs font-bold">W</span>
               WhatsApp
             </button>
-            <button @click="emit('addAccount', 'messenger')" class="flex-1 py-3 border-2 border-dashed border-purple-200 rounded-lg text-purple-600 font-bold hover:border-purple-500 hover:bg-purple-50 transition flex justify-center items-center gap-2 focus:outline-none">
+            <button @click="emit('addAccount', 'messenger')" class="py-3 border-2 border-dashed border-purple-200 rounded-lg text-purple-600 font-bold hover:border-purple-500 hover:bg-purple-50 transition flex justify-center items-center gap-2 focus:outline-none">
               <span class="w-6 h-6 bg-purple-600 text-white rounded-full flex items-center justify-center text-xs font-bold">M</span>
               Messenger
+            </button>
+            <button @click="emit('addAccount', 'shopee')" class="py-3 border-2 border-dashed border-orange-200 rounded-lg text-orange-500 font-bold hover:border-orange-500 hover:bg-orange-50 transition flex justify-center items-center gap-2 focus:outline-none">
+              <span class="w-6 h-6 bg-orange-500 text-white rounded-full flex items-center justify-center text-xs font-bold">S</span>
+              Shopee
+            </button>
+            <button @click="emit('addAccount', 'tiktok')" class="py-3 border-2 border-dashed border-gray-300 rounded-lg text-black font-bold hover:border-black hover:bg-gray-100 transition flex justify-center items-center gap-2 focus:outline-none col-span-2 sm:col-span-1">
+              <span class="w-6 h-6 bg-black text-white rounded-full flex items-center justify-center text-xs font-bold">T</span>
+              TikTok
             </button>
           </div>
         </div>
@@ -362,6 +372,26 @@ const handleRemoveSnippetImage = (index: number) => {
                   <span
                     class="absolute top-0.5 left-0.5 w-6 h-6 bg-white rounded-full shadow-md transition-transform duration-200"
                     :class="soundEnabled ? 'translate-x-5' : 'translate-x-0'"
+                  ></span>
+                </button>
+              </div>
+
+              <div class="border-t border-gray-100"></div>
+
+              <!-- Toggle: Tự động kiểm tra cập nhật -->
+              <div class="flex items-center justify-between">
+                <div>
+                  <p class="text-sm font-semibold text-gray-700">Tự động kiểm tra cập nhật</p>
+                  <p class="text-xs text-gray-400 mt-0.5">Khi bật, ứng dụng sẽ tự động kiểm tra phiên bản mới mỗi khi khởi động</p>
+                </div>
+                <button
+                  @click="emit('update:autoUpdateEnabled', !autoUpdateEnabled)"
+                  class="relative w-12 h-7 rounded-full transition-colors duration-200 focus:outline-none flex-shrink-0"
+                  :class="autoUpdateEnabled ? 'bg-zalo-primary' : 'bg-gray-300'"
+                >
+                  <span
+                    class="absolute top-0.5 left-0.5 w-6 h-6 bg-white rounded-full shadow-md transition-transform duration-200"
+                    :class="autoUpdateEnabled ? 'translate-x-5' : 'translate-x-0'"
                   ></span>
                 </button>
               </div>

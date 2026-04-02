@@ -7,3 +7,6 @@ Phase 1:
 - Tối ưu code 85% và thêm thông báo khi nhận tin nhắn
 - [V1.2] Bổ sung nút Refresh Webview và cấu trúc mở rộng đa nền tảng (Zalo, FB,...)
 - [V1.3] Tính năng tự động thông báo cập nhật (Auto Update Banner)
+- Cập nhật tính năng tin nhắn nhanh kèm tối đa 6 hình ảnh
+- Cập nhật bật tắt thông báo cập nhật phiên bản mới
+
