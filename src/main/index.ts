@@ -177,7 +177,10 @@ function createWindow(): void {
   })
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
-    shell.openExternal(details.url)
+    const url = new URL(details.url)
+    if (url.protocol === 'http:' || url.protocol === 'https:') {
+      shell.openExternal(details.url)
+    }
     return { action: 'deny' }
   })
 
@@ -191,6 +194,31 @@ function createWindow(): void {
 
 app.whenReady().then(() => {
   app.setAppUserModelId('com.stepwell.omnichat')
+
+  // Chặn tất cả URL custom protocol lạ (ví dụ: bytedance:// của TikTok) đòi mở app ngoài
+  app.on('web-contents-created', (_, contents) => {
+    contents.on('will-navigate', (event, navigationUrl) => {
+      const parsedUrl = new URL(navigationUrl)
+      if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:' && parsedUrl.protocol !== 'file:' && parsedUrl.protocol !== 'local-img:') {
+        console.log('OmniChat: Chặn WebView điều hướng tới protocol lạ:', navigationUrl)
+        event.preventDefault()
+      }
+    })
+
+    contents.setWindowOpenHandler((details) => {
+      const url = new URL(details.url)
+      if (url.protocol === 'http:' || url.protocol === 'https:') {
+        shell.openExternal(details.url)
+      }
+      return { action: 'deny' }
+    })
+  })
+
+  // Chặn tận gốc custom protocol từ iframe bằng cách đăng ký nó vào lõi trình duyệt nội bộ
+  protocol.handle('bytedance', () => {
+    console.log('OmniChat: Đã nuốt request bytedance:// tránh văng popup hệ thống.')
+    return new Response(null, { status: 204 }) // Nuốt request không làm gì cả
+  })
 
   // Đăng ký custom protocol để renderer có thể tải ảnh local (bypass web security)
   protocol.handle('local-img', async (request) => {

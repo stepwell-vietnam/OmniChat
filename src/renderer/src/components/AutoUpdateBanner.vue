@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, watch } from 'vue'
 
-const CURRENT_VERSION = 1.3 // Số phiên bản hiện hành
+const CURRENT_VERSION = 1.4 // Số phiên bản hiện hành
 
 const props = defineProps<{
   enabled: boolean
