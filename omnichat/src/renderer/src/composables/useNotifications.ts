@@ -1,18 +1,16 @@
-// ===== STEPWELL OMNICHAT — NOTIFICATION COMPOSABLE =====
-// Quản lý âm thanh "ting" + Windows Desktop Toast — có toggle tắt/mở
-
+// ===== STEPWELL OMNICHAT — NOTIFICATION COMPOSABLE (Optimized) =====
 import { ref, watch, type ComputedRef, type Ref } from 'vue'
 import type { Account } from '../types'
 
 export function useNotifications(
   soundEnabled: Ref<boolean>,
-  notificationEnabled: Ref<boolean>
+  _notificationEnabled: Ref<boolean>
 ) {
   const previousUnreadCounts = ref<Record<string, number>>({})
 
-  /** Phát sóng âm thanh "ting" bằng Web Audio API */
+  /** Play "ting" sound via Web Audio API */
   const playNotificationSound = (): void => {
-    if (!soundEnabled.value) return  // ← Toggle guard
+    if (!soundEnabled.value) return
 
     try {
       const AudioCtx = window.AudioContext || (window as any).webkitAudioContext
@@ -34,43 +32,34 @@ export function useNotifications(
 
       osc.start(ctx.currentTime)
       osc.stop(ctx.currentTime + 0.2)
-    } catch (e) {
-      console.error('OmniChat: Lỗi phát âm thanh', e)
-    }
+    } catch (e) { /* silent */ }
   }
 
-  /** Xin quyền thông báo Windows khi khởi động */
+  /** Request notification permission */
   const requestPermission = (): void => {
     if (Notification.permission !== 'granted' && Notification.permission !== 'denied') {
       Notification.requestPermission()
     }
   }
 
-  /** Theo dõi thay đổi unread → bắn thông báo */
+  /** Watch unread changes -> trigger callback (for bell icon) */
   const watchUnreadChanges = (
-    accounts: Ref<Account[]>,
-    unreadCounts: ComputedRef<Record<string, number>>
+    _accounts: Ref<Account[]>,
+    unreadCounts: ComputedRef<Record<string, number>>,
+    onNewMessage?: (accId: string) => void
   ): void => {
     watch(
       unreadCounts,
       (newCounts) => {
+        const hasPrev = Object.keys(previousUnreadCounts.value).length > 0
         for (const accId in newCounts) {
           const newVal = newCounts[accId] || 0
-          const oldVal =
-            previousUnreadCounts.value[accId] !== undefined
-              ? previousUnreadCounts.value[accId]
-              : newVal
+          const oldVal = previousUnreadCounts.value[accId] !== undefined
+            ? previousUnreadCounts.value[accId]
+            : newVal
 
-          if (newVal > oldVal && Object.keys(previousUnreadCounts.value).length > 0) {
-            const acc = accounts.value.find((a) => a.id === accId)
-            if (acc) {
-              playNotificationSound()
-              if (notificationEnabled.value && Notification.permission === 'granted') {  // ← Toggle guard
-                new Notification(`📥 Zalo Mới: ${acc.name}`, {
-                  body: `Sếp ơi, ${acc.name} vừa có khách nhắn tin! (Tổng: ${newVal} chờ xử lý)`
-                })
-              }
-            }
+          if (newVal > oldVal && hasPrev) {
+            onNewMessage?.(accId)
           }
         }
         previousUnreadCounts.value = { ...newCounts }

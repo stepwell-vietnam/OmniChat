@@ -1,374 +1,599 @@
 import { ipcRenderer } from 'electron'
 
-console.log('OmniChat: V3 Webview Preload Script Injected!')
+// ============================================================================
+// STEPWELL OMNICHAT — Webview Preload (Optimized)
+// 1. Notification Intercept (instant new message detection)
+// 2. Avatar Scrape (periodic, 15s) — PAUSED when tab hidden
+// 3. Title Observer (backup unread detection)
+// 4. DOM Scanner — PAUSED when tab hidden
+// ============================================================================
 
-function parseConversationItem(el: HTMLElement) {
-  const innerTexts = el.innerText.trim().split('\n').map(l => l.trim()).filter(l => l.length > 0)
-  
-  if (innerTexts.length < 2) return null
+// === VISIBILITY FLAG (set by App.vue via executeJavaScript) ===
+;(window as any).__omnichat_visible = true // Mặc định visible cho tab đầu tiên
 
-  // Bộ lọc rác chống quét banner Zalo PC
-  const blackList = ['Khi đăng nhập Zalo Web', 'Tải Zalo PC', 'Đồng bộ tin nhắn', 'Phiên bản web']
-  if (blackList.some(word => innerTexts[0].includes(word) || (innerTexts[1] && innerTexts[1].includes(word)))) {
-    return null
-  }
+// === 1. NOTIFICATION INTERCEPTOR ===
+const OriginalNotification = window.Notification
 
-  const rawName = innerTexts[0]
-
-  // ==== CHIẾN LƯỢC QUÉT BADGE ĐỎ (UNREAD) ====
-  let unreadCount = 0;
-
-  // Lớp 1: Bắt thẳng thóp qua Tên Class đặc trưng của Zalo Web
-  const badgeTags = el.querySelectorAll('[class*="unread"], [class*="badge"], [class*="notify"], [class*="Count"]');
-  for (const b of Array.from(badgeTags)) {
-      const txt = (b.textContent || '').trim();
-      if (/^\d+\+?$/.test(txt)) {
-          unreadCount = parseInt(txt) || 0;
-          break;
-      }
-  }
-
-  // Lớp 2: Phân Tích Màu Sắc (Huy hiệu gốc thường là Nền Màu Đỏ chứa Text Trắng)
-  if (unreadCount === 0) {
-      const allTextNodes = el.querySelectorAll('span, div');
-      for (const b of Array.from(allTextNodes)) {
-          const txt = (b.textContent || '').trim();
-          if (/^\d+$/.test(txt) && txt.length < 4 && b.childElementCount === 0) {
-             const style = window.getComputedStyle(b);
-             if (style.backgroundColor && style.backgroundColor !== 'rgba(0, 0, 0, 0)' && (style.color === 'rgb(255, 255, 255)' || style.borderRadius !== '0px')) {
-                 unreadCount = parseInt(txt);
-                 break;
-             }
-          }
-      }
-  }
-
-  let timeStr = ''
-  let messageStr = ''
-
-  // Regex nhận diện giờ
-  const timeRegex = /^(\d{1,2}:\d{2}|\d{1,2}\/\d{1,2}|Hôm qua|Vài giây|\d+\s+(giây|phút|giờ|ngày|tuần|tháng|năm).*)$/i
-
-  // Lớp 3: Fallback (Logic mồ côi)
-  if (unreadCount === 0) {
-      const candidateTexts = innerTexts.filter(t => /^\d+\+?$/.test(t));
-      if (candidateTexts.length === 1 && parseInt(candidateTexts[0]) < 100) unreadCount = parseInt(candidateTexts[0]) || 0;
-  }
-
-  for (let i = 1; i < innerTexts.length; i++) {
-    const text = innerTexts[i]
-    if (!timeStr && timeRegex.test(text)) {
-      timeStr = text
-    } else if (!/^\d+\+?$/.test(text)) { 
-      if (text.length > messageStr.length) messageStr = text
-    }
-  }
-
-  if (!messageStr && innerTexts.length >= 2) {
-    messageStr = innerTexts[innerTexts.length - 1]
-    if (messageStr === timeStr && innerTexts.length > 2) messageStr = innerTexts[innerTexts.length - 2]
-  }
-
-  const img = el.querySelector('img')
-  const id = el.getAttribute('data-id') || el.id || `zalo_${rawName.substring(0,5)}`
-
-  return {
-    id: id,
-    name: rawName,
-    lastMessage: messageStr || '...',
-    time: timeStr,
-    avatar: img ? img.src : '',
-    unread: unreadCount
-  }
-}
-
-function scrapeConversations() {
-  const convList: any[] = []
-  const convNodes = new Set<HTMLElement>()
-
-  // CHIẾN LƯỢC TÌM KIẾM NGƯỢC (Bottom-Up)
-  const images = document.querySelectorAll('img')
-  images.forEach(img => {
-    let parent = img.parentElement
-    let depth = 0
-    while (parent && depth < 6) {
-      const hasItemSignal = parent.id.includes('item') || parent.className.includes('item') || parent.getAttribute('data-id')
-      const hasButtonRole = parent.getAttribute('role') === 'button'
-      
-      if (hasItemSignal || hasButtonRole) {
-        if (parent.innerText.includes('\n')) {
-          convNodes.add(parent)
-          break
-        }
-      }
-      parent = parent.parentElement
-      depth++
-    }
-  })
-
-  convNodes.forEach(node => {
-    const data = parseConversationItem(node)
-    if (data && data.name && data.time) {
-      convList.push(data)
-    }
-  })
-  
-  if (convList.length > 0) {
-    ipcRenderer.sendToHost('zalo-data', {
-      type: 'conversations',
-      data: convList.slice(0, 30)
-    })
-  }
-
-  // ==== ĐẾM TỔNG TIN NHẮN CHƯA ĐỌC — 4 CHIẾN LƯỢC ====
-  let globalUnread = 0;
-  
-  // Chiến lược 1: Quét Title Bar (Tin cậy nhất — Zalo tự thêm "(N)" vào tiêu đề)
-  const titleText = document.title || '';
-  const titleMatch = titleText.match(/\((\d+)\)/) || titleText.match(/\[(\d+)\]/);
-  if (titleMatch) {
-    globalUnread = parseInt(titleMatch[1]) || 0;
-  }
-
-  // Chiến lược 2: Quét Tọa Độ Cột Trái (Navbar Zalo X < 80px)
-  if (globalUnread === 0) {
-    const allLeafNodes = Array.from(document.querySelectorAll('div, span')).filter(el => {
-      return el.childElementCount === 0 && (el.textContent || '').trim().length > 0;
-    });
-
-    for (const b of allLeafNodes) {
-      const r = b.getBoundingClientRect();
-      const txt = (b.textContent || '').trim();
-      
-      // Mở rộng vùng quét: toàn bộ cột trái navbar Zalo
-      if (r.left >= 0 && r.right < 85 && r.width > 0 && r.height > 0) {
-        if (/^\d+\+?$/.test(txt) && parseInt(txt) < 1000) {
-          globalUnread += parseInt(txt);
-        } else if (txt === 'N' || txt === '!') {
-          globalUnread += 1;
-        }
-      }
-    }
-  }
-
-  // Chiến lược 3: Đếm tổng unread từ danh sách conversations đã scrape
-  if (globalUnread === 0 && convList.length > 0) {
-    globalUnread = convList.reduce((sum: number, c: any) => sum + (c.unread || 0), 0);
-  }
-
-  // Chiến lược 4: Quét badge bằng CSS selector phổ quát
-  if (globalUnread === 0) {
-    const badgeElements = document.querySelectorAll(
-      '[class*="badge"], [class*="unread"], [class*="notify"], [class*="count"], [class*="num"]'
-    );
-    for (const el of Array.from(badgeElements)) {
-      const txt = (el.textContent || '').trim();
-      const r = el.getBoundingClientRect();
-      // Chỉ lấy badge ở vùng trái (không lấy badge trong chat content)
-      if (/^\d+\+?$/.test(txt) && r.left < 400 && r.width < 40 && r.height < 40) {
-        globalUnread += parseInt(txt) || 0;
-      }
-    }
-  }
-
-  // Báo tin về đất liền
+;(window as any).Notification = function(title: string, options?: NotificationOptions) {
   ipcRenderer.sendToHost('zalo-data', {
-    type: 'global-unread',
-    data: globalUnread
-  });
+    type: 'zalo-notification',
+    data: {
+      title: title,
+      body: options?.body || '',
+      icon: options?.icon || '',
+      timestamp: Date.now()
+    }
+  })
+  return new OriginalNotification(title, options)
 }
 
-// ==== TRÍCH XUẤT ẢNH ĐẠI DIỆN ZALO CỦA TÀI KHOẢN ====
-let lastScrapedAvatar = '';
+Object.defineProperty(window.Notification, 'permission', {
+  get: () => OriginalNotification.permission
+})
+;(window.Notification as any).requestPermission = OriginalNotification.requestPermission.bind(OriginalNotification)
+
+// === 2. AVATAR SCRAPER ===
+let lastScrapedAvatar = ''
 
 function scrapeAccountInfo() {
-  let avatarUrl = '';
-  let displayName = '';
+  let avatarUrl = ''
+  let displayName = ''
 
-  // Chiến lược 1: Ảnh avatar ở CUỐI navbar trái (vùng profile user Y > innerHeight - 120)
-  const allImages = Array.from(document.querySelectorAll('img'));
+  const allImages = Array.from(document.querySelectorAll('img'))
+
+  // Strategy 1: Avatar at bottom-left navbar (user profile area)
   for (const img of allImages) {
-    const r = img.getBoundingClientRect();
-    // Avatar user ở góc dưới trái: X < 70, Y gần đáy, kích thước 30-50px
-    if (r.left >= 0 && r.right < 75 
-        && r.top > window.innerHeight - 120 
-        && r.width >= 25 && r.width <= 60 
+    const r = img.getBoundingClientRect()
+    if (r.left >= 0 && r.right < 75
+        && r.top > window.innerHeight - 120
+        && r.width >= 25 && r.width <= 60
         && r.height >= 25 && r.height <= 60
         && (img as HTMLImageElement).src.startsWith('http')) {
-      avatarUrl = (img as HTMLImageElement).src;
-      break;
+      avatarUrl = (img as HTMLImageElement).src
+      break
     }
   }
 
-  // Chiến lược 2: Tìm ảnh nhỏ nhất ở cột trái (thường là avatar user)
+  // Strategy 2: Last small image in left column
   if (!avatarUrl) {
     const leftImages = allImages.filter(img => {
-      const r = img.getBoundingClientRect();
-      return r.left >= 0 && r.right < 75 && r.width >= 25 && r.width <= 60 
-             && (img as HTMLImageElement).src.startsWith('http');
-    });
-    // Avatar user thường ở dưới cùng => lấy phần tử cuối
+      const r = img.getBoundingClientRect()
+      return r.left >= 0 && r.right < 75 && r.width >= 25 && r.width <= 60
+             && (img as HTMLImageElement).src.startsWith('http')
+    })
     if (leftImages.length > 0) {
-      const lastImg = leftImages[leftImages.length - 1] as HTMLImageElement;
-      avatarUrl = lastImg.src;
+      avatarUrl = (leftImages[leftImages.length - 1] as HTMLImageElement).src
     }
   }
 
-  // Chiến lược 3: Quét qua class chứa "avatar" hoặc "profile" ở vùng trái
+  // Strategy 3: CSS class-based search
   if (!avatarUrl) {
-    const sel = 'img[class*="avatar"], img[class*="profile"], img[class*="user"]';
-    const candidates = document.querySelectorAll(sel);
+    const candidates = document.querySelectorAll('img[class*="avatar"], img[class*="profile"], img[class*="user"]')
     for (const img of Array.from(candidates)) {
-      const r = img.getBoundingClientRect();
-      const src = (img as HTMLImageElement).src;
+      const r = img.getBoundingClientRect()
+      const src = (img as HTMLImageElement).src
       if (r.left < 80 && r.width >= 20 && src.startsWith('http')) {
-        avatarUrl = src;
-        break;
+        avatarUrl = src
+        break
       }
     }
   }
 
-  // Tìm tên hiển thị gần avatar (tooltip hoặc title attribute)
+  // Extract display name near avatar
   if (avatarUrl) {
-    const avatarImg = allImages.find(img => (img as HTMLImageElement).src === avatarUrl);
+    const avatarImg = allImages.find(img => (img as HTMLImageElement).src === avatarUrl)
     if (avatarImg) {
-      displayName = avatarImg.getAttribute('alt') || avatarImg.getAttribute('title') || '';
-      // Tìm trong parent
+      displayName = avatarImg.getAttribute('alt') || avatarImg.getAttribute('title') || ''
       if (!displayName) {
-        const parent = avatarImg.closest('[title]');
-        if (parent) displayName = parent.getAttribute('title') || '';
+        const parent = avatarImg.closest('[title]')
+        if (parent) displayName = parent.getAttribute('title') || ''
       }
     }
   }
 
-  // Chỉ gửi khi có avatar MỚI (tránh spam IPC)
+  // Only send when avatar changes (avoid IPC spam)
   if (avatarUrl && avatarUrl.startsWith('http') && avatarUrl !== lastScrapedAvatar) {
-    lastScrapedAvatar = avatarUrl;
+    lastScrapedAvatar = avatarUrl
     ipcRenderer.sendToHost('zalo-data', {
       type: 'account-info',
       data: { avatar: avatarUrl, name: displayName }
-    });
-    console.log('OmniChat: Đã bắt được Avatar Zalo:', avatarUrl.substring(0, 60) + '...');
+    })
   }
 }
 
-// Hàm Trích xuất Dữ liệu Lõi (Inside Message Layout)
-function scrapeMessages() {
-  const msgList: any[] = [];
-  
-  const candidates = Array.from(document.querySelectorAll('div[data-id], div[class*="chat-message"], div[class*="message-bubble"]'))
-  const rightPanelElements = candidates.filter(el => {
-    const rect = el.getBoundingClientRect();
-    return rect.left > 330 && rect.width > 0 && (el as HTMLElement).innerText.trim().length > 0;
-  });
+// === 3. ENGINE: Title Observer + DOM Unread Scanner + Avatar Sync ===
+let lastReportedUnread = -1
 
-  const seenTexts = new Set<string>();
-  let index = 0;
-  
-  for(let i = 0; i < rightPanelElements.length; i++) {
-     const el = rightPanelElements[i] as HTMLElement;
-     const htmlClass = el.className || '';
-     const style = window.getComputedStyle(el);
-     const isSender = htmlClass.includes('me') || htmlClass.includes('sender') || style.justifyContent === 'flex-end' || style.alignSelf === 'flex-end' || style.alignItems === 'flex-end';
-     
-     const spans = Array.from(el.querySelectorAll('span, p, div[class*="text"]'));
-     let txt = '';
-     if (spans.length > 0) {
-        txt = spans.map(s => (s.textContent || '').trim()).sort((a,b) => b.length - a.length)[0];
-     }
-     
-     if (!txt || txt.length === 0) {
-        txt = (el.textContent || '').trim();
-     }
-     
-     if (txt && txt.length > 0 && !seenTexts.has(txt)) {
-        seenTexts.add(txt);
-        msgList.push({
-           id: `msg_${index++}`,
-           text: txt,
-           isSender: isSender,
-           time: ''
-        });
-     }
+function reportUnread(count: number): void {
+  if (count !== lastReportedUnread) {
+    lastReportedUnread = count
+    ipcRenderer.sendToHost('zalo-data', {
+      type: 'global-unread',
+      data: count
+    })
+  }
+}
+
+// Quét DOM để đếm số tin chưa đọc (hoạt động ngay cả khi tiêu đề không đổi)
+function scanDomForUnread(): number {
+  let totalUnread = 0
+
+  // === CHIẾN THUẬT 1: Đếm badge số trong danh sách chat Zalo ===
+  // Zalo hiển thị số chưa đọc dạng: <span>5</span> hoặc <div>99+</div> bên cạnh tên cuộc trò chuyện
+  const badges = document.querySelectorAll(
+    '[class*="unread"], [class*="badge"], [class*="count"]'
+  )
+  for (const el of Array.from(badges)) {
+    const text = (el as HTMLElement).textContent?.trim() || ''
+    const rect = (el as HTMLElement).getBoundingClientRect()
+    // Chỉ tính các badge nhỏ, nằm trong vùng danh sách chat (bên trái)
+    if (rect.width > 0 && rect.width < 40 && rect.height > 0 && rect.height < 30) {
+      const num = parseInt(text.replace('+', ''))
+      if (!isNaN(num) && num > 0) {
+        totalUnread += num
+      }
+    }
   }
 
-  // CHẾ ĐỘ CỨU HỘ (Sonic Scan)
-  if (msgList.length === 0) {
-      const allTextRight = Array.from(document.querySelectorAll('span, p, div')).filter(el => {
-          const r = el.getBoundingClientRect();
-          return r.left > 350 && el.childElementCount === 0 && (el.textContent || '').trim().length > 0;
-      });
-      const uniqueRaw = [...new Set(allTextRight.map(e => (e.textContent || '').trim()))].slice(-15);
-      const finalRaw = uniqueRaw.filter(t => !t.includes('Chào mừng đến với Zalo') && !t.includes('Tải Zalo PC') && !t.includes('Trò chuyện'));
-      
-      finalRaw.forEach(txt => {
-          msgList.push({ id: `msg_${index++}`, text: txt, isSender: index % 2 === 0, time: '' });
-      });
+  // === CHIẾN THUẬT 2: Tìm các chấm tròn đỏ/cam nhỏ (visual unread dot) ===
+  if (totalUnread === 0) {
+    const allSpans = document.querySelectorAll('span, div')
+    for (const el of Array.from(allSpans)) {
+      const s = window.getComputedStyle(el)
+      const rect = (el as HTMLElement).getBoundingClientRect()
+      const bg = s.backgroundColor
+      const text = (el as HTMLElement).textContent?.trim() || ''
+      // Tìm phần tử nhỏ, tròn, màu đỏ/cam, có chứa số
+      if (
+        rect.width >= 14 && rect.width <= 32 &&
+        rect.height >= 14 && rect.height <= 32 &&
+        (bg.includes('255') || bg.includes('233') || bg.includes('244')) && // đỏ/cam
+        /^\d+\+?$/.test(text)
+      ) {
+        const num = parseInt(text.replace('+', ''))
+        if (!isNaN(num) && num > 0) {
+          totalUnread += num
+        }
+      }
+    }
   }
 
-  ipcRenderer.sendToHost('zalo-data', {
-     type: 'messages',
-     data: msgList.slice(-40)
+  // === CHIẾN THUẬT 3: Fallback từ tiêu đề trang ===
+  const titleMatch = document.title.match(/\((\d+)\)/)
+  if (titleMatch) {
+    const titleCount = parseInt(titleMatch[1]) || 0
+    if (titleCount > totalUnread) {
+      totalUnread = titleCount
+    }
+  }
+
+  return totalUnread
+}
+
+window.addEventListener('load', () => {
+  // Initial avatar scrape
+  setTimeout(scrapeAccountInfo, 4000)
+
+  // Periodic avatar sync (every 15s) — CHỈ QUÉT KHI TAB ĐANG HIỆN
+  setInterval(() => {
+    if ((window as any).__omnichat_visible !== false) {
+      scrapeAccountInfo()
+    }
+  }, 15000)
+
+  // Title observer — detect unread changes instantly
+  let lastTitle = document.title
+  const titleEl = document.querySelector('title')
+  if (titleEl) {
+    const titleObs = new MutationObserver(() => {
+      const newTitle = document.title
+      if (newTitle !== lastTitle) {
+        lastTitle = newTitle
+        const m = newTitle.match(/\((\d+)\)/)
+        const count = m ? parseInt(m[1]) || 0 : 0
+        reportUnread(count)
+      }
+    })
+    titleObs.observe(titleEl, { childList: true, characterData: true, subtree: true })
+  }
+
+  // DOM Scanner — quét DOM mỗi 5 giây, CHỈ KHI TAB ĐANG HIỆN (tối ưu CPU)
+  setTimeout(() => {
+    setInterval(() => {
+      if ((window as any).__omnichat_visible !== false) {
+        const count = scanDomForUnread()
+        reportUnread(count)
+      }
+    }, 5000) // Tăng từ 3s lên 5s để giảm CPU thêm
+  }, 5000) // Chờ 5s cho trang load xong
+})
+
+// ============================================================================
+// === 4. QUICK SNIPPETS ENGINE ===
+// Lắng nghe phím "\", hiển thị bảng gợi ý, chèn nội dung vào khung chat
+// ============================================================================
+
+interface SnippetMeta {
+  id: number
+  shortcut: string
+  content: string
+  imageCount: number
+}
+
+let snippetsCache: SnippetMeta[] = []
+let isSnippetMode = false
+let snippetBuffer = ''
+let selectedIndex = 0
+let overlayEl: HTMLDivElement | null = null
+
+// --- Đọc snippets từ Main Process qua IPC (kênh đã proven hoạt động) ---
+function loadSnippetsFromMainProcess() {
+  try {
+    const raw = ipcRenderer.sendSync('get-snippets-sync')
+    if (raw && typeof raw === 'string') {
+      const parsed = JSON.parse(raw)
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        snippetsCache = parsed
+      }
+    }
+  } catch { /* ignore */ }
+}
+
+// Poll mỗi 5s + on load — CHỈ KHI TAB ĐANG HIỆN
+window.addEventListener('load', () => {
+  setTimeout(loadSnippetsFromMainProcess, 3000)
+  setInterval(() => {
+    if ((window as any).__omnichat_visible !== false) {
+      loadSnippetsFromMainProcess()
+    }
+  }, 5000)
+})
+
+// --- Lọc snippets theo ký tự đã gõ ---
+function getFilteredSnippets(): SnippetMeta[] {
+  if (!snippetBuffer) return snippetsCache
+  return snippetsCache.filter(s =>
+    s.shortcut.toLowerCase().startsWith(snippetBuffer.toLowerCase())
+  )
+}
+
+// --- Tạo & cập nhật Overlay UI ---
+function showOverlay(): void {
+  const filtered = getFilteredSnippets()
+  if (filtered.length === 0) {
+    hideOverlay()
+    return
+  }
+
+  if (!overlayEl) {
+    overlayEl = document.createElement('div')
+    overlayEl.id = 'omnichat-snippet-overlay'
+    Object.assign(overlayEl.style, {
+      position: 'fixed',
+      zIndex: '999999',
+      background: '#ffffff',
+      borderRadius: '10px',
+      boxShadow: '0 6px 24px rgba(0,0,0,0.18), 0 0 0 1px rgba(0,0,0,0.05)',
+      maxHeight: '220px',
+      overflowY: 'auto',
+      minWidth: '300px',
+      maxWidth: '420px',
+      fontSize: '13px',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
+      padding: '4px 0',
+      display: 'none'
+    })
+    document.body.appendChild(overlayEl)
+  }
+
+  // Định vị overlay gần khung nhập liệu
+  const active = document.activeElement as HTMLElement
+  if (active) {
+    const rect = active.getBoundingClientRect()
+    const spaceAbove = rect.top
+    const spaceBelow = window.innerHeight - rect.bottom
+
+    if (spaceAbove > spaceBelow) {
+      // Hiện phía trên
+      overlayEl.style.bottom = (window.innerHeight - rect.top + 6) + 'px'
+      overlayEl.style.top = 'auto'
+    } else {
+      // Hiện phía dưới
+      overlayEl.style.top = (rect.bottom + 6) + 'px'
+      overlayEl.style.bottom = 'auto'
+    }
+    overlayEl.style.left = Math.max(8, Math.min(rect.left, window.innerWidth - 430)) + 'px'
+  }
+
+  // Render danh sách
+  overlayEl.innerHTML = filtered.map((s, i) => `
+    <div data-idx="${i}" style="
+      padding: 8px 14px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: ${i === selectedIndex ? '#e8f4fd' : '#ffffff'};
+      border-left: 3px solid ${i === selectedIndex ? '#0068ff' : 'transparent'};
+      transition: background 0.1s;
+    " onmouseenter="this.style.background='#f0f5ff'" onmouseleave="this.style.background='${i === selectedIndex ? '#e8f4fd' : '#ffffff'}'">
+      <span style="
+        background: #f0f2f5;
+        color: #444;
+        font-family: 'SF Mono', Monaco, Consolas, monospace;
+        font-size: 11px;
+        padding: 3px 8px;
+        border-radius: 5px;
+        font-weight: 700;
+        flex-shrink: 0;
+        letter-spacing: 0.3px;
+      ">\\${s.shortcut}</span>
+      <span style="
+        flex: 1;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: #1a1a1a;
+        font-size: 13px;
+      ">${escapeHtml(s.content.substring(0, 60))}${s.content.length > 60 ? '…' : ''}</span>
+      ${s.imageCount > 0 ? `<span style="color: #0068ff; font-size: 11px; flex-shrink: 0; opacity: 0.8;">📷${s.imageCount}</span>` : ''}
+    </div>
+  `).join('')
+
+  overlayEl.style.display = 'block'
+
+  // Click để chọn snippet
+  overlayEl.querySelectorAll('[data-idx]').forEach(el => {
+    el.addEventListener('mousedown', (e) => {
+      e.preventDefault()
+      e.stopPropagation()
+      const idx = parseInt((el as HTMLElement).dataset.idx || '0')
+      if (filtered[idx]) selectSnippet(filtered[idx])
+    })
   })
 }
 
-// Hàm giả lập click
-function simulateClick(el: HTMLElement) {
-  el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
-  el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
-  el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+function hideOverlay(): void {
+  if (overlayEl) overlayEl.style.display = 'none'
+  isSnippetMode = false
+  snippetBuffer = ''
+  selectedIndex = 0
 }
 
-// Lắng nghe Lệnh Click Mở phòng chat
-ipcRenderer.on('open-conversation', (_event, convId) => {
-  console.log('OmniChat: Mở phòng chat ID:', convId);
-  const target = document.querySelector(`[data-id="${convId}"], [id="${convId}"], [id*="${convId}"]`) as HTMLElement;
+function escapeHtml(str: string): string {
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+}
+
+// --- Chọn snippet: xóa trigger text + chèn nội dung ---
+function selectSnippet(snippet: SnippetMeta): void {
+  // Lấy độ dài chuỗi cần xóa TRƯỚC khi gọi hideOverlay() (vì hideOverlay sẽ reset snippetBuffer)
+  const triggerLength = snippetBuffer.length + 1 // +1 cho dấu "\"
   
-  if (target) {
-    simulateClick(target);
-    setTimeout(scrapeMessages, 600);
-    setTimeout(scrapeMessages, 1500);
-  } else {
-    const allClickable = document.querySelectorAll('div[role="button"], div[class*="item"]');
-    let found = false;
-    for (const el of Array.from(allClickable)) {
-        if ((el as HTMLElement).innerText.includes(convId)) {
-            simulateClick(el as HTMLElement);
-            setTimeout(scrapeMessages, 600);
-            setTimeout(scrapeMessages, 1500);
-            found = true;
-            break;
-        }
+  hideOverlay()
+
+  // Xóa chuỗi trigger (\xxx) bằng Selection API
+  const sel = window.getSelection()
+  if (sel && sel.rangeCount > 0) {
+    // Mở rộng selection về phía trái để chọn chuỗi trigger
+    for (let i = 0; i < triggerLength; i++) {
+      sel.modify('extend', 'backward', 'character')
     }
-    if (!found) setTimeout(scrapeMessages, 800);
+    // Xóa phần đã chọn
+    document.execCommand('delete', false)
   }
-})
 
-// ==== ENGINE CHÍNH: MutationObserver + Periodic Polling ====
-let debounceTimer: any = null
-const observer = new MutationObserver(() => {
-  if (debounceTimer) clearTimeout(debounceTimer)
-  debounceTimer = setTimeout(() => {
-    scrapeConversations();
-    scrapeMessages(); 
-  }, 1000)
-})
+  // Chèn nội dung text
+  if (snippet.content) {
+    document.execCommand('insertText', false, snippet.content)
+  }
 
-window.addEventListener('load', () => {
-  observer.observe(document.body, { childList: true, subtree: true, characterData: true })
+  // Gửi yêu cầu paste ảnh nếu có
+  if (snippet.imageCount > 0) {
+    ipcRenderer.sendToHost('zalo-data', {
+      type: 'snippet-paste-images',
+      data: { snippetId: snippet.id }
+    })
+  }
+}
+
+// --- Keyboard Listener (Capture Phase) ---
+document.addEventListener('keydown', (e: KeyboardEvent) => {
+  // Bỏ qua nếu không có snippets
+  if (snippetsCache.length === 0) return
+
+  // === SNIPPET MODE ĐANG BẬT ===
+  if (isSnippetMode) {
+    if (e.key === 'Escape') {
+      e.preventDefault()
+      e.stopImmediatePropagation()
+      hideOverlay()
+      return
+    }
+
+    if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      e.stopImmediatePropagation()
+      selectedIndex = Math.max(0, selectedIndex - 1)
+      showOverlay()
+      return
+    }
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      e.stopImmediatePropagation()
+      const filtered = getFilteredSnippets()
+      selectedIndex = Math.min(filtered.length - 1, selectedIndex + 1)
+      showOverlay()
+      return
+    }
+
+    if (e.key === 'Enter') {
+      const filtered = getFilteredSnippets()
+      if (filtered.length > 0 && selectedIndex < filtered.length) {
+        e.preventDefault()
+        e.stopImmediatePropagation()
+        selectSnippet(filtered[selectedIndex])
+      } else {
+        hideOverlay()
+      }
+      return
+    }
+
+    if (e.key === 'Backspace') {
+      if (snippetBuffer.length > 0) {
+        snippetBuffer = snippetBuffer.slice(0, -1)
+        selectedIndex = 0
+        // Delay nhỏ để ký tự bị xóa trong input trước khi re-render
+        setTimeout(() => showOverlay(), 10)
+      } else {
+        // Buffer rỗng = user xóa hết → đóng overlay
+        hideOverlay()
+      }
+      return // Cho phép backspace xóa ký tự trong input bình thường
+    }
+
+    // Đóng overlay khi gõ khoảng trắng hoặc Tab
+    if (e.key === ' ' || e.key === 'Tab') {
+      hideOverlay()
+      return
+    }
+
+    // Ký tự thường → thêm vào buffer
+    if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      snippetBuffer += e.key
+      selectedIndex = 0
+      setTimeout(() => showOverlay(), 10)
+      return
+    }
+
+    return
+  }
+
+  // === PHÁT HIỆN DẤU "\" → BẬT SNIPPET MODE ===
+  if (e.key === '\\' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    // Chỉ kích hoạt khi đang focus vào ô nhập liệu
+    const active = document.activeElement as HTMLElement
+    if (!active) return
+
+    const tag = active.tagName.toLowerCase()
+    const isEditable = tag === 'input' || tag === 'textarea' ||
+                       active.isContentEditable ||
+                       active.getAttribute('contenteditable') === 'true' ||
+                       active.closest('[contenteditable="true"]') !== null
+
+    if (!isEditable) return
+
+    isSnippetMode = true
+    snippetBuffer = ''
+    selectedIndex = 0
+    setTimeout(() => showOverlay(), 50) // Chờ dấu "\" được gõ vào input
+  }
+}, true) // Capture phase — chặn trước khi Zalo/FB xử lý
+
+// Ẩn overlay khi click ra ngoài
+document.addEventListener('mousedown', (e) => {
+  if (isSnippetMode && overlayEl && !overlayEl.contains(e.target as Node)) {
+    hideOverlay()
+  }
+}, true)
+// ============================================================================
+// === 5. BATCH PASTE IMAGES (DOM INJECTION) ===
+// ============================================================================
+ipcRenderer.on('execute-paste-images', (_e, base64List: string[]) => {
+  console.log(`OmniChat: Nhận ${base64List.length} ảnh Base64 từ Main Process`)
   
-  // Lần đầu: chờ Zalo load xong SPA
-  setTimeout(scrapeConversations, 2000)
-  setTimeout(scrapeConversations, 5000) // Quét lại lần 2 phòng Zalo AJAX chậm
-  setTimeout(scrapeAccountInfo, 4000)   // Chờ avatar render xong
+  const processImages = async () => {
+    const files: File[] = []
+    
+    for (let i = 0; i < base64List.length; i++) {
+      const base64Str = base64List[i]
+      if (!base64Str.includes(',')) continue
+      
+      try {
+        const res = await fetch(base64Str)
+        const blob = await res.blob()
+        const mime = blob.type || 'image/png'
+        const ext = mime.split('/')[1] === 'jpeg' ? 'jpg' : mime.split('/')[1] || 'png'
+        
+        const file = new File([blob], `snippet_image_${Date.now()}_${i}.${ext}`, {
+          type: mime,
+          lastModified: Date.now()
+        })
+        files.push(file)
+      } catch (err) {
+        console.error('OmniChat: Lỗi convert base64 image', err)
+      }
+    }
 
-  // POLLING ĐỊNH KỲ: đảm bảo badge + avatar luôn cập nhật 
-  // (MutationObserver có thể bỏ sót khi webview ở background)
-  setInterval(() => {
-    scrapeConversations();  // Cập nhật unread count
-  }, 5000) // Mỗi 5 giây
+    if (files.length === 0) {
+      console.log('OmniChat: Không có ảnh hợp lệ để paste.')
+      return
+    }
 
-  setInterval(() => {
-    scrapeAccountInfo();    // Cập nhật avatar (chỉ gửi IPC khi có thay đổi)
-  }, 15000) // Mỗi 15 giây
+    console.log(`OmniChat: Đã tạo ${files.length} File object, thử các chiến thuật inject...`)
+
+    // Tìm input element phù hợp
+    const chatInput = document.activeElement as HTMLElement
+      || document.querySelector('[contenteditable="true"]') as HTMLElement
+      || document.querySelector('[data-testid="composer-input"]') as HTMLElement
+
+    if (!chatInput) {
+      console.error('OmniChat: Không tìm thấy ô nhập liệu để paste ảnh')
+      return
+    }
+
+    // === CHIẾN THUẬT 1: Drop Event (Zalo/Messenger dùng React, xử lý drop tốt) ===
+    try {
+      const dt = new DataTransfer()
+      files.forEach(f => dt.items.add(f))
+
+      const dropEvent = new DragEvent('drop', {
+        bubbles: true,
+        cancelable: true,
+        dataTransfer: dt
+      })
+      chatInput.dispatchEvent(dropEvent)
+      console.log('OmniChat: ✅ Chiến thuật DROP — đã dispatch')
+    } catch (err) {
+      console.warn('OmniChat: Drop event thất bại:', err)
+    }
+
+    // === CHIẾN THUẬT 2: Tìm hidden file input và inject trực tiếp ===
+    try {
+      const fileInputs = document.querySelectorAll('input[type="file"][accept*="image"]')
+      if (fileInputs.length > 0) {
+        const fileInput = fileInputs[fileInputs.length - 1] as HTMLInputElement
+        const dt = new DataTransfer()
+        files.forEach(f => dt.items.add(f))
+        fileInput.files = dt.files
+        fileInput.dispatchEvent(new Event('change', { bubbles: true }))
+        console.log('OmniChat: ✅ Chiến thuật FILE INPUT — đã inject vào', fileInput)
+      } else {
+        console.log('OmniChat: ⚠ Không tìm thấy file input trên trang')
+      }
+    } catch (err) {
+      console.warn('OmniChat: File input inject thất bại:', err)
+    }
+
+    // === CHIẾN THUẬT 3: Paste event (fallback) ===
+    try {
+      const dt = new DataTransfer()
+      files.forEach(f => dt.items.add(f))
+      
+      const pasteEvent = new ClipboardEvent('paste', {
+        bubbles: true,
+        cancelable: true
+      })
+      Object.defineProperty(pasteEvent, 'clipboardData', {
+        value: dt,
+        writable: false
+      })
+      chatInput.dispatchEvent(pasteEvent)
+      console.log('OmniChat: ✅ Chiến thuật PASTE — đã dispatch')
+    } catch (err) {
+      console.warn('OmniChat: Paste event thất bại:', err)
+    }
+  }
+  
+  processImages()
 })

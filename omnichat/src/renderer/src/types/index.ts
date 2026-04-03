@@ -1,34 +1,28 @@
 // ===== STEPWELL OMNICHAT — TYPE DEFINITIONS =====
 
-/** Tài khoản Zalo trong hệ thống */
+export type Platform = 'zalo' | 'whatsapp' | 'messenger' | 'shopee' | 'tiktok' | 'fanpage'
+
+/** Platform configuration */
+export const PLATFORMS: Record<Platform, { name: string; url: string; color: string; icon: string }> = {
+  zalo: { name: 'Zalo', url: 'https://chat.zalo.me', color: 'bg-blue-600', icon: 'Z' },
+  whatsapp: { name: 'WhatsApp', url: 'https://web.whatsapp.com', color: 'bg-green-600', icon: 'W' },
+  messenger: { name: 'Messenger', url: 'https://www.messenger.com', color: 'bg-purple-600', icon: 'M' },
+  shopee: { name: 'Shopee', url: 'https://seller.shopee.vn/webchat', color: 'bg-orange-500', icon: 'S' },
+  tiktok: { name: 'TikTok', url: 'https://seller-vn.tiktok.com/chat/', color: 'bg-black', icon: 'T' },
+  fanpage: { name: 'Fanpage', url: 'https://business.facebook.com/latest/inbox/', color: 'bg-blue-800', icon: 'F' }
+}
+
+/** Account in the system */
 export interface Account {
   id: string
+  slot?: number
+  linkedToId?: string  // Fanpage liên kết với Messenger account nào
   name: string
-  avatarBase64?: string       // Avatar do user upload thủ công (ưu tiên cao nhất)
-  zaloAvatarUrl?: string      // Avatar tự động scrape từ Zalo Web (ưu tiên 2)
-  zaloDisplayName?: string    // Tên hiển thị tự động lấy từ Zalo
+  platform: Platform
+  avatarBase64?: string
+  zaloAvatarUrl?: string
+  zaloDisplayName?: string
   color: string
   isHidden: boolean
-  unread: number              // Runtime-only: số tin chưa đọc từ Webview
-}
-
-/** Hội thoại đã scrape từ Zalo */
-export interface Conversation {
-  id: string
-  name: string
-  lastMessage: string
-  time: string
-  avatar: string
   unread: number
-  zaloId: string
-  zaloName: string
-  zaloColor: string
-}
-
-/** Tin nhắn trong 1 phòng chat */
-export interface ChatMessage {
-  id: string
-  text: string
-  isSender: boolean
-  time: string
 }
