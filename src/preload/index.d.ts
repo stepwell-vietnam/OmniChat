@@ -28,6 +28,9 @@ declare global {
       loadAccountsBackup: () => Promise<string | null>
       saveSnippetsBackup: (data: string) => Promise<boolean>
       loadSnippetsBackup: () => Promise<string | null>
+      // Account Management
+      clearPartitionData: (partition: string) => Promise<boolean>
+      openSellerWindow: (partition: string, url: string) => void
     }
   }
 }

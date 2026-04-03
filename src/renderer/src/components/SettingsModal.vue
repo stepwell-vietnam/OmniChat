@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import type { Account, Platform } from '../types'
 import { PLATFORMS } from '../types'
 import { getInitials } from '../utils'
@@ -18,7 +18,9 @@ const props = defineProps<{
 const emit = defineEmits<{
   close: []
   addAccount: [platform: Platform]
+  addFanpage: [linkedAccId: string]
   toggleVisibility: [id: string]
+  deleteAccount: [id: string]
   updateName: [id: string, name: string]
   uploadAvatar: [id: string, data: string]
   'update:soundEnabled': [val: boolean]
@@ -30,6 +32,49 @@ const emit = defineEmits<{
   deleteSnippet: [id: number]
   updateSnippet: [id: number, shortcut: string, content: string, formImages?: string[]]
 }>()
+
+// Fanpage linking popup
+const showFanpagePicker = ref(false)
+
+// Nhóm tài khoản theo nền tảng
+const groupedAccounts = computed(() => {
+  const platformOrder: Platform[] = ['zalo', 'messenger', 'fanpage', 'whatsapp', 'shopee', 'tiktok']
+  const groups: { platform: Platform; label: string; accounts: Account[] }[] = []
+  for (const p of platformOrder) {
+    const accs = props.accounts.filter(a => (a.platform || 'zalo') === p)
+    if (accs.length > 0) {
+      groups.push({ platform: p, label: PLATFORMS[p].name, accounts: accs })
+    }
+  }
+  return groups
+})
+
+
+const handleFanpageClick = () => {
+  const fbAccs = props.accounts.filter(a => a.platform === 'messenger')
+  if (fbAccs.length === 0) {
+    // Không có Messenger nào → cho tạo Fanpage độc lập
+    const choice = confirm('Bạn chưa có tài khoản Messenger nào.\n\n• Bấm OK để tạo Fanpage độc lập (phải đăng nhập Facebook riêng).\n• Bấm Hủy để thêm Messenger trước.')
+    if (choice) {
+      emit('addAccount', 'fanpage')
+    }
+    return
+  }
+  // Có Messenger → luôn hiện popup để chọn liên kết hoặc tạo độc lập
+  showFanpagePicker.value = true
+}
+
+const selectFanpageLink = (accId: string) => {
+  showFanpagePicker.value = false
+  emit('addFanpage', accId)
+}
+
+const handleDeleteAccount = (acc: Account) => {
+  const confirmMsg = `Bạn có chắc muốn XÓA tài khoản "${acc.name}"?\n\nHành động này sẽ xóa toàn bộ dữ liệu đăng nhập, cache và ảnh của tài khoản này. Không thể hoàn tác!`
+  if (confirm(confirmMsg)) {
+    emit('deleteAccount', acc.id)
+  }
+}
 
 const needsRestart = ref(false)
 const newStoragePath = ref('')
@@ -64,6 +109,22 @@ const handleChangeStorage = async () => {
     migrationError.value = String(e)
   } finally {
     isMigrating.value = false
+  }
+}
+
+
+
+const handleOpenSellerCenter = (acc: Account) => {
+  const partition = 'persist:' + (acc.platform || 'zalo') + '_' + acc.id
+  let url = ''
+  if (acc.platform === 'shopee') {
+    url = 'https://seller.shopee.vn/'
+  } else if (acc.platform === 'tiktok') {
+    url = 'https://seller-vn.tiktok.com/'
+  }
+  
+  if (url) {
+    window.api.openSellerWindow(partition, url)
   }
 }
 
@@ -161,7 +222,7 @@ const handleRemoveSnippetImage = (index: number) => {
         >
           <span class="flex items-center gap-1.5">
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
-            Tài khoản Zalo
+            Tài Khoản
           </span>
         </button>
         <button
@@ -190,64 +251,89 @@ const handleRemoveSnippetImage = (index: number) => {
       <div class="flex-1 overflow-y-auto p-6 bg-white">
 
         <!-- ===== TAB 1: QUẢN LÝ TÀI KHOẢN ===== -->
-        <div v-if="activeSection === 'accounts'" class="space-y-4">
-          <div
-            v-for="acc in accounts"
-            :key="acc.id"
-            class="flex items-center gap-4 p-4 border rounded-lg bg-gray-50/50 hover:bg-white transition shadow-sm"
-            :class="acc.isHidden ? 'opacity-50' : ''"
-          >
-            <!-- Avatar Upload -->
-            <div class="relative group w-14 h-14 rounded-full flex-shrink-0 cursor-pointer overflow-hidden border-2 border-white shadow-sm flex items-center justify-center font-bold text-white text-xl" :class="!(acc.avatarBase64 || acc.zaloAvatarUrl) ? acc.color : ''">
-              <img v-if="acc.avatarBase64" :src="acc.avatarBase64" class="w-full h-full object-cover" />
-              <img v-else-if="acc.zaloAvatarUrl" :src="acc.zaloAvatarUrl" class="w-full h-full object-cover" referrerpolicy="no-referrer" />
-              <span v-else>{{ getInitials(acc.name) }}</span>
+        <div v-if="activeSection === 'accounts'" class="space-y-5">
 
-              <label class="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition cursor-pointer" title="Upload Avatar (ghi đè ảnh Zalo)">
-                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-white"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
-                <input type="file" accept="image/*" class="hidden" @change="(e: Event) => handleAvatarUpload(e, acc.id)" />
-              </label>
+          <!-- Nhóm tài khoản theo nền tảng -->
+          <div v-for="group in groupedAccounts" :key="group.platform" class="border rounded-lg overflow-hidden">
+            <!-- Header nhóm -->
+            <div class="flex items-center gap-2 px-4 py-2.5 border-b" :class="PLATFORMS[group.platform]?.color + '/10 bg-opacity-10'" style="background: linear-gradient(135deg, rgba(0,0,0,0.02), rgba(0,0,0,0.05));">
+              <span class="w-6 h-6 rounded-full flex items-center justify-center text-[11px] font-bold text-white" :class="PLATFORMS[group.platform]?.color || 'bg-gray-500'">{{ PLATFORMS[group.platform]?.icon || '?' }}</span>
+              <span class="font-bold text-gray-700 text-sm">{{ group.label }}</span>
+              <span class="text-[11px] text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded-full">{{ group.accounts.length }}</span>
             </div>
 
-            <!-- Name & Info -->
-            <div class="flex-1 min-w-0">
-              <input
-                type="text"
-                :value="acc.name"
-                @input="emit('updateName', acc.id, ($event.target as HTMLInputElement).value)"
-                class="font-semibold text-gray-800 text-lg bg-transparent border-b border-transparent hover:border-gray-300 focus:border-zalo-primary focus:outline-none py-0.5 w-full transition truncate"
-                placeholder="Nhập tên gọi nhớ (VD: Zalo Bán Hàng)"
-              />
-              <div class="text-xs text-gray-400 mt-1 flex items-center gap-2 flex-wrap">
-                <span class="px-1.5 py-0.5 rounded text-[10px] font-bold text-white" :class="PLATFORMS[acc.platform || 'zalo']?.color || 'bg-gray-500'">{{ PLATFORMS[acc.platform || 'zalo']?.name || 'Unknown' }}</span>
-                <span class="truncate">Partition: <code class="bg-gray-200 px-1 py-0.5 rounded text-[10px] text-gray-500 font-mono">persist:{{ acc.platform || 'zalo' }}_{{ acc.id }}</code></span>
-                <span v-if="acc.zaloDisplayName" class="text-blue-500">• Zalo: {{ acc.zaloDisplayName }}</span>
-                <span v-if="acc.zaloAvatarUrl" class="text-green-500">• Ảnh tự động ✓</span>
-                <span v-if="acc.unread > 0" class="text-red-500 font-bold">• {{ acc.unread }} chưa đọc</span>
-              </div>
-            </div>
-
-            <!-- Toggle Visibility -->
-            <div class="flex items-center gap-2 flex-shrink-0">
-              <button
-                @click="emit('toggleVisibility', acc.id)"
-                class="px-3 py-1.5 rounded-md text-sm font-medium transition flex items-center gap-1.5"
-                :class="acc.isHidden ? 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100' : 'bg-orange-50 text-orange-600 hover:bg-orange-100'"
+            <!-- Danh sách tài khoản trong nhóm -->
+            <div class="divide-y divide-gray-100 bg-white">
+              <div
+                v-for="acc in group.accounts"
+                :key="acc.id"
+                class="flex items-center gap-3 px-4 py-3 hover:bg-gray-50/80 transition"
+                :class="acc.isHidden ? 'opacity-40' : ''"
               >
-                <template v-if="acc.isHidden">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
-                  Bật Lên Lại
-                </template>
-                <template v-else>
-                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>
-                  Gập Khỏi Menu
-                </template>
-              </button>
+                <!-- Avatar -->
+                <div class="relative group w-11 h-11 rounded-full flex-shrink-0 cursor-pointer overflow-hidden border-2 border-white shadow-sm flex items-center justify-center font-bold text-white text-base" :class="!(acc.avatarBase64 || acc.zaloAvatarUrl) ? acc.color : ''">
+                  <img v-if="acc.avatarBase64" :src="acc.avatarBase64" class="w-full h-full object-cover" />
+                  <img v-else-if="acc.zaloAvatarUrl" :src="acc.zaloAvatarUrl" class="w-full h-full object-cover" referrerpolicy="no-referrer" />
+                  <span v-else>{{ getInitials(acc.name) }}</span>
+                  <label class="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition cursor-pointer" title="Upload Avatar">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-white"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+                    <input type="file" accept="image/*" class="hidden" @change="(e: Event) => handleAvatarUpload(e, acc.id)" />
+                  </label>
+                </div>
+
+                <!-- Name & Info -->
+                <div class="flex-1 min-w-0">
+                  <input
+                    type="text"
+                    :value="acc.name"
+                    @input="emit('updateName', acc.id, ($event.target as HTMLInputElement).value)"
+                    class="font-semibold text-gray-800 text-sm bg-transparent border-b border-transparent hover:border-gray-300 focus:border-zalo-primary focus:outline-none py-0.5 w-full transition truncate"
+                    placeholder="Nhập tên gọi nhớ"
+                  />
+                  <div class="text-[11px] text-gray-400 mt-0.5 flex items-center gap-1.5 flex-wrap">
+                    <template v-if="acc.platform === 'fanpage' && acc.linkedToId">
+                      <span class="text-green-600 font-semibold">🔗 {{ accounts.find(a => a.id === acc.linkedToId)?.name || 'Messenger' }}</span>
+                    </template>
+                    <span v-if="acc.zaloDisplayName" class="text-blue-500">{{ acc.zaloDisplayName }}</span>
+                    <span v-if="acc.zaloAvatarUrl" class="text-green-500">✓ Ảnh tự động</span>
+                    <span v-if="acc.unread > 0" class="text-red-500 font-bold">{{ acc.unread }} chưa đọc</span>
+                  </div>
+                </div>
+
+                <!-- Actions -->
+                <div class="flex items-center gap-1.5 flex-shrink-0">
+                  <button
+                    v-if="acc.platform === 'shopee' || acc.platform === 'tiktok'"
+                    @click="handleOpenSellerCenter(acc)"
+                    class="px-2 py-1.5 rounded-md text-xs font-semibold text-blue-600 bg-blue-50 hover:bg-blue-100 transition border border-blue-200 mr-2 flex items-center gap-1"
+                    title="Mở Kênh Người Bán trong cửa sổ mới (không cần đăng nhập lại)"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"></path><line x1="3" y1="6" x2="21" y2="6"></line><path d="M16 10a4 4 0 0 1-8 0"></path></svg>
+                    Kênh Bán
+                  </button>
+                  <button
+                    @click="emit('toggleVisibility', acc.id)"
+                    class="p-1.5 rounded-md text-sm transition"
+                    :class="acc.isHidden ? 'text-indigo-500 hover:bg-indigo-50' : 'text-orange-500 hover:bg-orange-50'"
+                    :title="acc.isHidden ? 'Bật lại' : 'Ẩn'"
+                  >
+                    <svg v-if="acc.isHidden" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                    <svg v-else xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>
+                  </button>
+                  <button
+                    @click="handleDeleteAccount(acc)"
+                    class="p-1.5 rounded-md text-red-400 hover:text-red-600 hover:bg-red-50 transition"
+                    title="Xóa tài khoản"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
 
           <!-- Add Account Buttons -->
-          <div class="grid grid-cols-2 gap-3">
+          <div class="grid grid-cols-3 gap-3">
             <button @click="emit('addAccount', 'zalo')" class="py-3 border-2 border-dashed border-blue-200 rounded-lg text-blue-600 font-bold hover:border-blue-500 hover:bg-blue-50 transition flex justify-center items-center gap-2 focus:outline-none">
               <span class="w-6 h-6 bg-blue-600 text-white rounded-full flex items-center justify-center text-xs font-bold">Z</span>
               Zalo
@@ -264,10 +350,53 @@ const handleRemoveSnippetImage = (index: number) => {
               <span class="w-6 h-6 bg-orange-500 text-white rounded-full flex items-center justify-center text-xs font-bold">S</span>
               Shopee
             </button>
-            <button @click="emit('addAccount', 'tiktok')" class="py-3 border-2 border-dashed border-gray-300 rounded-lg text-black font-bold hover:border-black hover:bg-gray-100 transition flex justify-center items-center gap-2 focus:outline-none col-span-2 sm:col-span-1">
+            <button @click="emit('addAccount', 'tiktok')" class="py-3 border-2 border-dashed border-gray-300 rounded-lg text-black font-bold hover:border-black hover:bg-gray-100 transition flex justify-center items-center gap-2 focus:outline-none">
               <span class="w-6 h-6 bg-black text-white rounded-full flex items-center justify-center text-xs font-bold">T</span>
               TikTok
             </button>
+            <button @click="handleFanpageClick" class="py-3 border-2 border-dashed border-blue-300 rounded-lg text-blue-800 font-bold hover:border-blue-800 hover:bg-blue-50 transition flex justify-center items-center gap-2 focus:outline-none">
+              <span class="w-6 h-6 bg-blue-800 text-white rounded-full flex items-center justify-center text-xs font-bold">F</span>
+              Fanpage
+            </button>
+          </div>
+
+          <!-- Popup chọn tài khoản Facebook để liên kết Fanpage -->
+          <div v-if="showFanpagePicker" class="border-2 border-blue-200 rounded-lg p-4 bg-blue-50/50 mt-3">
+            <h4 class="font-bold text-blue-800 mb-2 text-sm">🔗 Chọn tài khoản Messenger để liên kết Fanpage:</h4>
+            <p class="text-xs text-gray-500 mb-3">Fanpage sẽ dùng chung phiên đăng nhập Facebook (không cần login lại)</p>
+            <div class="space-y-2">
+              <button
+                v-for="msgAcc in accounts.filter(a => a.platform === 'messenger')"
+                :key="msgAcc.id"
+                @click="selectFanpageLink(msgAcc.id)"
+                class="w-full flex items-center gap-3 p-3 rounded-lg bg-white hover:bg-blue-100 border border-gray-200 hover:border-blue-400 transition"
+              >
+                <div class="w-10 h-10 rounded-full flex items-center justify-center font-bold text-white text-sm overflow-hidden" :class="!(msgAcc.avatarBase64 || msgAcc.zaloAvatarUrl) ? msgAcc.color : ''">
+                  <img v-if="msgAcc.avatarBase64" :src="msgAcc.avatarBase64" class="w-full h-full object-cover rounded-full" />
+                  <img v-else-if="msgAcc.zaloAvatarUrl" :src="msgAcc.zaloAvatarUrl" class="w-full h-full object-cover rounded-full" referrerpolicy="no-referrer" />
+                  <span v-else>{{ getInitials(msgAcc.name) }}</span>
+                </div>
+                <div class="text-left flex-1">
+                  <div class="font-semibold text-gray-800 text-sm">{{ msgAcc.name }}</div>
+                  <div class="text-[11px] text-gray-400">{{ msgAcc.zaloDisplayName || 'Messenger' }} • Dùng chung cookie Facebook</div>
+                </div>
+                <span class="text-blue-500 text-xs font-bold">🔗 Liên kết</span>
+              </button>
+              <!-- Tùy chọn tạo độc lập -->
+              <button
+                @click="showFanpagePicker = false; emit('addAccount', 'fanpage')"
+                class="w-full flex items-center gap-3 p-3 rounded-lg bg-gray-50 hover:bg-gray-100 border border-dashed border-gray-300 hover:border-gray-400 transition"
+              >
+                <div class="w-10 h-10 rounded-full flex items-center justify-center font-bold text-white text-sm bg-gray-400">
+                  <span>+</span>
+                </div>
+                <div class="text-left flex-1">
+                  <div class="font-semibold text-gray-600 text-sm">Tạo Fanpage độc lập</div>
+                  <div class="text-[11px] text-gray-400">Partition riêng, phải đăng nhập Facebook mới</div>
+                </div>
+              </button>
+            </div>
+            <button @click="showFanpagePicker = false" class="mt-2 text-xs text-gray-400 hover:text-gray-600">Hủy</button>
           </div>
         </div>
 

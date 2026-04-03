@@ -1,4 +1,4 @@
-import { app, shell, BrowserWindow, ipcMain, dialog, webContents, protocol, clipboard, nativeImage } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, dialog, webContents, protocol, clipboard, nativeImage, session } from 'electron'
 import { join } from 'path'
 import icon from '../../resources/icon.png?asset'
 import fs from 'fs'
@@ -204,9 +204,40 @@ app.whenReady().then(() => {
         event.preventDefault()
       }
     })
+    
+    // Sử dụng bộ lọc WebRequest để chặn từ trong network (mạnh nhất, xử lý cả iframe & AJAX)
+    try {
+      contents.session.webRequest.onBeforeRequest((details, callback) => {
+        if (details.url.startsWith('bytedance://')) {
+          console.log('OmniChat: Chặn triệt để request bytedance:// :', details.url)
+          return callback({ cancel: true })
+        }
+        callback({ cancel: false })
+      })
+    } catch (e) {
+      // Bỏ qua lỗi nếu session chưa sẵn sàng
+    }
 
     contents.setWindowOpenHandler((details) => {
       const url = new URL(details.url)
+
+      // Cho phép popup đăng nhập Facebook/Meta mở trong app (OAuth login flow)
+      const fbDomains = ['facebook.com', 'messenger.com', 'instagram.com', 'meta.com', 'accountkit.com']
+      const isFbLogin = fbDomains.some(d => url.hostname.endsWith(d))
+
+      if (isFbLogin) {
+        // Mở popup login trong cửa sổ BrowserWindow mới (giữ cookie trong partition)
+        return {
+          action: 'allow',
+          overrideBrowserWindowOptions: {
+            width: 600,
+            height: 700,
+            title: 'Đăng nhập Facebook',
+            autoHideMenuBar: true
+          }
+        }
+      }
+
       if (url.protocol === 'http:' || url.protocol === 'https:') {
         shell.openExternal(details.url)
       }
@@ -440,6 +471,36 @@ app.whenReady().then(() => {
   ipcMain.handle('restart-app', () => {
     app.relaunch()
     app.exit(0)
+  })
+
+  // ===== IPC: Clear Partition Data (xóa tài khoản → giải phóng bộ nhớ) =====
+  ipcMain.handle('clear-partition-data', async (_e, partition: string) => {
+    try {
+      const ses = session.fromPartition(partition)
+      await ses.clearStorageData()
+      await ses.clearCache()
+      console.log('OmniChat: ✅ Đã xóa dữ liệu partition:', partition)
+      return true
+    } catch (err) {
+      console.error('OmniChat: Lỗi xóa partition:', err)
+      return false
+    }
+  })
+
+  // ===== IPC: Mở Kênh Người Bán (Shopee/TikTok Seller Center) chung partition
+  ipcMain.on('open-seller-window', (_e, partition: string, url: string) => {
+    const sellerWindow = new BrowserWindow({
+      width: 1200,
+      height: 800,
+      title: 'Kênh Người Bán',
+      webPreferences: {
+        partition: partition, // Dùng chung partition để không phải đăng nhập lại
+        nodeIntegration: false,
+        contextIsolation: true
+      }
+    })
+    sellerWindow.setMenu(null)
+    sellerWindow.loadURL(url)
   })
 
   // ===== IPC: Snippet Images — Lưu base64 thành file trên ổ cứng =====

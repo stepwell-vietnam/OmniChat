@@ -16,6 +16,7 @@ const showSettings = ref(false)
 const accounts = ref<Account[]>([])
 const webviewPreloadPath = ref(window.api?.getWebviewPreloadPath?.() || '')
 const hasNewMessage = ref<Record<string, boolean>>({})
+const isSellerMode = ref<Record<string, boolean>>({})
 const snippets = ref<DbQuickReply[]>([])
 
 // ===== SETTINGS =====
@@ -204,6 +205,16 @@ const handleSelectTab = (id: string) => {
   }
 }
 
+// Tính partition cho mỗi tài khoản
+const getPartition = (acc: Account): string => {
+  // Fanpage liên kết với Messenger → dùng chung partition
+  if (acc.platform === 'fanpage' && acc.linkedToId) {
+    const linked = accounts.value.find(a => a.id === acc.linkedToId)
+    if (linked) return 'persist:' + (linked.platform || 'messenger') + '_' + linked.id
+  }
+  return 'persist:' + (acc.platform || 'zalo') + '_' + acc.id
+}
+
 const handleAddAccount = (platform: Platform = 'zalo') => {
   const pf = PLATFORMS[platform]
   const count = accounts.value.filter(a => a.platform === platform).length + 1
@@ -214,6 +225,43 @@ const handleAddAccount = (platform: Platform = 'zalo') => {
     color: pf.color,
     isHidden: false, unread: 0
   })
+}
+
+// Thêm Fanpage liên kết với tài khoản Messenger đã chọn (chung phiên đăng nhập)
+const handleAddFanpage = (linkedAccId: string) => {
+  const linkedAcc = accounts.value.find(a => a.id === linkedAccId)
+  const count = accounts.value.filter(a => a.platform === 'fanpage').length + 1
+  accounts.value.push({
+    id: Date.now().toString(),
+    name: 'Fanpage ' + count + (linkedAcc ? ' (' + linkedAcc.name + ')' : ''),
+    platform: 'fanpage',
+    linkedToId: linkedAccId,
+    color: PLATFORMS.fanpage.color,
+    isHidden: false, unread: 0
+  })
+}
+
+// Xóa tài khoản + giải phóng bộ nhớ partition
+const handleDeleteAccount = async (id: string) => {
+  const acc = accounts.value.find(a => a.id === id)
+  if (!acc) return
+
+  // Xóa partition data (cache, cookies, localStorage) qua Main Process
+  const partition = getPartition(acc)
+  try {
+    await window.api.clearPartitionData(partition)
+  } catch (e) {
+    console.warn('OmniChat: Không thể xóa partition data:', e)
+  }
+
+  // Xóa khỏi IndexedDB + bộ nhớ
+  await db.accounts.delete(id)
+  accounts.value = accounts.value.filter(a => a.id !== id)
+
+  // Nếu đang xem tab này → chuyển sang tab khác
+  if (activeTab.value === id) {
+    activeTab.value = visibleAccounts.value.length > 0 ? visibleAccounts.value[0].id : '1'
+  }
 }
 
 const handleToggleVisibility = (id: string) => {
@@ -408,6 +456,10 @@ const handleDismissMigration = async () => {
   showMigrationBanner.value = false
   try { await window.api.dismissMigration() } catch (e) { /* silent */ }
 }
+
+const handleQuitApp = () => {
+  window.close()
+}
 </script>
 
 <template>
@@ -435,6 +487,7 @@ const handleDismissMigration = async () => {
         :has-new-message="hasNewMessage"
         @select-tab="handleSelectTab"
         @open-settings="showSettings = true"
+        @quit-app="handleQuitApp"
       />
 
       <!-- Main: Webview Pool -->
@@ -444,19 +497,61 @@ const handleDismissMigration = async () => {
           :id="'webview_' + acc.id"
           :key="'wv-' + acc.id"
           :src="PLATFORMS[acc.platform || 'zalo']?.url || 'https://chat.zalo.me'"
-          :partition="'persist:' + (acc.platform || 'zalo') + '_' + acc.id"
+          :partition="getPartition(acc)"
           :preload="webviewPreloadPath"
           @ipc-message="(e: any) => handleIpcMessage(e, acc)"
           class="absolute top-0 left-0 w-full h-full flex-1 outline-none border-none bg-[#f1f2f4]"
           :style="{
-            opacity: (activeTab === acc.id && !acc.isHidden) ? 1 : 0.001,
-            pointerEvents: (activeTab === acc.id && !acc.isHidden) ? 'auto' : 'none',
-            zIndex: (activeTab === acc.id && !acc.isHidden) ? 10 : 0
+            opacity: (activeTab === acc.id && !acc.isHidden && !isSellerMode[acc.id]) ? 1 : 0.001,
+            pointerEvents: (activeTab === acc.id && !acc.isHidden && !isSellerMode[acc.id]) ? 'auto' : 'none',
+            zIndex: (activeTab === acc.id && !acc.isHidden && !isSellerMode[acc.id]) ? 10 : 0
           }"
           useragent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
           allowpopups
         ></webview>
 
+        <!-- Alternate View Webviews (Seller Center / Facebook) -->
+        <webview
+          v-for="acc in accounts.filter(a => ['shopee', 'tiktok', 'messenger'].includes(a.platform || ''))"
+          :id="'webview_alt_' + acc.id"
+          :key="'wv-alt-' + acc.id"
+          :src="acc.platform === 'shopee' ? 'https://seller.shopee.vn/' : (acc.platform === 'tiktok' ? 'https://seller-vn.tiktok.com/' : 'https://www.facebook.com/')"
+          :partition="getPartition(acc)"
+          allowpopups
+          class="absolute top-0 left-0 w-full h-full flex-1 outline-none border-none bg-white"
+          :style="{
+            opacity: (activeTab === acc.id && !acc.isHidden && isSellerMode[acc.id]) ? 1 : 0.001,
+            pointerEvents: (activeTab === acc.id && !acc.isHidden && isSellerMode[acc.id]) ? 'auto' : 'none',
+            zIndex: (activeTab === acc.id && !acc.isHidden && isSellerMode[acc.id]) ? 10 : 0
+          }"
+          useragent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        ></webview>
+
+        <!-- Floating Toggle Mode Button -->
+        <button
+          v-if="['shopee', 'tiktok', 'messenger'].includes(accounts.find(a => a.id === activeTab)?.platform || '')"
+          @click="isSellerMode[activeTab] = !isSellerMode[activeTab]"
+          class="absolute top-3 right-[3.5rem] z-20 px-3 h-9 rounded-full bg-blue-600/90 hover:bg-blue-600 text-white flex items-center gap-1.5 justify-center transition-all shadow-md backdrop-blur-sm shadow-blue-500/20 hover:scale-105"
+          :title="isSellerMode[activeTab] ? 'Quay lại Chat' : (accounts.find(a => a.id === activeTab)?.platform === 'messenger' ? 'Mở Facebook' : 'Mở Kênh Người Bán')"
+        >
+          <!-- Giao diện nút lúc ở bên Chat -->
+          <template v-if="!isSellerMode[activeTab]">
+            <template v-if="accounts.find(a => a.id === activeTab)?.platform === 'messenger'">
+              <!-- Facebook Icon -->
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z"></path></svg>
+              <span class="text-xs font-bold">Facebook</span>
+            </template>
+            <template v-else>
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"></path><line x1="3" y1="6" x2="21" y2="6"></line><path d="M16 10a4 4 0 0 1-8 0"></path></svg>
+              <span class="text-xs font-bold">Kênh Bán</span>
+            </template>
+          </template>
+          <!-- Giao diện lúc ở bên kia (mời quay lại Chat) -->
+          <template v-else>
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+            <span class="text-xs font-bold">Về Chat</span>
+          </template>
+        </button>
         <!-- Floating Refresh Button -->
         <button
           @click="handleRefreshWebview"
@@ -481,6 +576,8 @@ const handleDismissMigration = async () => {
         :snippets="snippets"
         @close="showSettings = false"
         @add-account="handleAddAccount"
+        @add-fanpage="handleAddFanpage"
+        @delete-account="handleDeleteAccount"
         @toggle-visibility="handleToggleVisibility"
         @update-name="handleUpdateName"
         @upload-avatar="handleUploadAvatar"

@@ -43,7 +43,15 @@ const api = {
   saveSnippetsBackup: (data: string): Promise<boolean> =>
     ipcRenderer.invoke('save-snippets-backup', data),
   loadSnippetsBackup: (): Promise<string | null> =>
-    ipcRenderer.invoke('load-snippets-backup')
+    ipcRenderer.invoke('load-snippets-backup'),
+
+  // ===== Account Management =====
+  clearPartitionData: (partition: string): Promise<boolean> =>
+    ipcRenderer.invoke('clear-partition-data', partition),
+  
+  // ===== Kênh Người Bán =====
+  openSellerWindow: (partition: string, url: string): void =>
+    ipcRenderer.send('open-seller-window', partition, url)
 }
 
 // Use `contextBridge` APIs to expose Electron APIs to
