@@ -16,7 +16,7 @@ win:
   executableName: StepwellOmniChat
   icon: build/icon.ico
 nsis:
-  artifactName: OmniChat_V1.5.${ext}
+  artifactName: OmniChat_V1.6.${ext}
   shortcutName: ${productName}
   uninstallDisplayName: ${productName}
   createDesktopShortcut: always
@@ -29,7 +29,7 @@ mac:
     - NSDownloadsFolderUsageDescription: Application requests access to the user's Downloads folder.
   notarize: false
 dmg:
-  artifactName: OmniChat_V1.5.${ext}
+  artifactName: OmniChat_V1.6.${ext}
 linux:
   target:
     - AppImage

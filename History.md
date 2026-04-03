@@ -9,5 +9,11 @@ Phase 1:
 - [V1.3] Tính năng tự động thông báo cập nhật (Auto Update Banner) - Cập nhật tính năng tin nhắn nhanh kèm tối đa 6 hình ảnh - Cập nhật bật tắt thông báo cập nhật phiên bản mới
 - [V1.4] Tích hợp chức năng nhắn tin đa nền tảng Shopee và TikTok Shop
 - [V1.5] Load lại cài đặt tài khoản và tin nhắn mẫu trước đó khi khởi động
-
-
+- [V1.6] Tích hợp Facebook Messenger & Fanpage - Nút chuyển đổi Chat/Seller/Facebook trực tiếp trên giao diện - Chặn popup bytedance:// gây phiền - Hỗ trợ xóa tài khoản kèm giải phóng bộ nhớ partition
+- [V1.7] Tối ưu hiệu suất hệ thống:
+  + Lazy-Load Seller/Facebook: webview chỉ tạo khi bấm toggle, tiết kiệm ~600MB RAM khi khởi động
+  + Hủy webview Seller khi quay về Chat: giải phóng RAM ngay lập tức
+  + Tạm dừng scanner trên tab ẩn: DOM Scanner, Avatar Scraper, Snippet Polling ngừng khi tab không active, giảm ~40% CPU
+  + Tài khoản đã ẩn = tắt hẳn webview, không tốn tài nguyên
+  + Kiểm tra cập nhật thủ công trong Settings (không còn tự động gọi API)
+  + Tính năng Nạp dữ liệu: load profile từ USB/máy khác mà không cần copy

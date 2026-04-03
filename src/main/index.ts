@@ -1,4 +1,4 @@
-import { app, shell, BrowserWindow, ipcMain, dialog, webContents, protocol, clipboard, nativeImage, session } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, dialog, webContents, protocol, clipboard, nativeImage, session, net } from 'electron'
 import { join } from 'path'
 import icon from '../../resources/icon.png?asset'
 import fs from 'fs'
@@ -160,7 +160,7 @@ function createWindow(): void {
     minHeight: 600,
     show: false,
     autoHideMenuBar: true,
-    title: 'Stepwell OmniChat - V1.5',
+    title: 'Stepwell OmniChat - V1.7',
     ...(process.platform === 'linux' ? { icon } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
@@ -219,27 +219,35 @@ app.whenReady().then(() => {
     }
 
     contents.setWindowOpenHandler((details) => {
-      const url = new URL(details.url)
+      try {
+        const url = new URL(details.url)
 
-      // Cho phép popup đăng nhập Facebook/Meta mở trong app (OAuth login flow)
-      const fbDomains = ['facebook.com', 'messenger.com', 'instagram.com', 'meta.com', 'accountkit.com']
-      const isFbLogin = fbDomains.some(d => url.hostname.endsWith(d))
+        // Chặn triệt để protocol lạ (bytedance://, tiktok://, v.v.) — KHÔNG cho hệ điều hành xử lý
+        if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+          console.log('OmniChat: Chặn popup protocol lạ:', details.url)
+          return { action: 'deny' }
+        }
 
-      if (isFbLogin) {
-        // Mở popup login trong cửa sổ BrowserWindow mới (giữ cookie trong partition)
-        return {
-          action: 'allow',
-          overrideBrowserWindowOptions: {
-            width: 600,
-            height: 700,
-            title: 'Đăng nhập Facebook',
-            autoHideMenuBar: true
+        // Cho phép popup đăng nhập Facebook/Meta mở trong app (OAuth login flow)
+        const fbDomains = ['facebook.com', 'messenger.com', 'instagram.com', 'meta.com', 'accountkit.com']
+        const isFbLogin = fbDomains.some(d => url.hostname.endsWith(d))
+
+        if (isFbLogin) {
+          return {
+            action: 'allow',
+            overrideBrowserWindowOptions: {
+              width: 600,
+              height: 700,
+              title: 'Đăng nhập Facebook',
+              autoHideMenuBar: true
+            }
           }
         }
-      }
 
-      if (url.protocol === 'http:' || url.protocol === 'https:') {
         shell.openExternal(details.url)
+      } catch (e) {
+        // URL parse thất bại (protocol lạ) → chặn luôn
+        console.log('OmniChat: Chặn popup URL không hợp lệ:', details.url)
       }
       return { action: 'deny' }
     })
@@ -388,6 +396,60 @@ app.whenReady().then(() => {
     }
   })
 
+  // ===== IPC: Kết nối thư mục dữ liệu CÓ SẴN (Restore/Load) =====
+  ipcMain.handle('load-storage-folder', async () => {
+    const win = BrowserWindow.getAllWindows()[0]
+    if (!win) return { success: false, error: 'Phát hiện lỗi không tìm thấy cửa sổ.' }
+
+    const result = await dialog.showOpenDialog(win, {
+      title: 'Chọn thư mục chứa dữ liệu OmniChat đã lưu (OmniChatData)',
+      properties: ['openDirectory'],
+      buttonLabel: 'Khôi phục từ thư mục này'
+    })
+
+    if (result.canceled || result.filePaths.length === 0) {
+      return { success: false, error: 'cancelled' }
+    }
+
+    const selectedPath = result.filePaths[0]
+    // Thường dữ liệu cũ đã nằm trong thư mục mang tên 'OmniChatData', cần kiểm tra xem họ trỏ thẳng hay trỏ thư mục cha
+    let targetPath = selectedPath
+    if (!selectedPath.endsWith('OmniChatData')) {
+      const maybeChild = join(selectedPath, 'OmniChatData')
+      if (fs.existsSync(maybeChild)) {
+        targetPath = maybeChild
+      } else {
+        targetPath = join(selectedPath, 'OmniChatData') // Nếu ép buộc
+      }
+    }
+
+    // Kiểm tra xem có vẻ đúng cấu trúc OmniChat ko (có thể bỏ qua bước check cứng ngắc, nhưng check IndexedDB thì an tâm hơn)
+    // if (!fs.existsSync(join(targetPath, 'IndexedDB'))) { ... }
+
+    try {
+      const cfg = readConfig()
+      const currentPath = cfg.storagePath || app.getPath('userData')
+
+      if (targetPath === currentPath) {
+        return { success: false, error: 'Thư mục đã chọn đang là thư mục hoạt động hiện tại.' }
+      }
+
+      // Chỉ việc cập nhật config, KHÔNG COPY GÌ CẢ
+      cfg.storagePath = targetPath
+      // Xóa các key migration cũ nếu có
+      delete cfg.migrationStatus
+      delete cfg.oldStoragePath
+      
+      writeConfig(cfg)
+
+      console.log(`OmniChat: ✅ Kết nối dữ liệu thành công tới: ${targetPath}`)
+      return { success: true, newPath: targetPath }
+    } catch (e) {
+      console.error('OmniChat: ❌ Lỗi kết nối dữ liệu:', e)
+      return { success: false, error: String(e) }
+    }
+  })
+
   // ===== IPC: Kiểm tra trạng thái migration khi khởi động =====
   ipcMain.handle('get-migration-status', () => {
     const cfg = readConfig()
@@ -465,6 +527,21 @@ app.whenReady().then(() => {
     cfg.migrationStatus = 'dismissed'
     writeConfig(cfg)
     return { success: true }
+  })
+
+  // ===== IPC: Kiểm tra cập nhật từ Main Process (tránh CORS) =====
+  ipcMain.handle('check-for-update', async () => {
+    try {
+      const response = await net.fetch('https://gitlab.com/stepwellvietnam/chatportal/-/raw/main/version.json', { cache: 'no-store' })
+      if (response.ok) {
+        const data = await response.json()
+        return { success: true, data }
+      }
+      return { success: false, error: 'Server trả về lỗi: ' + response.status }
+    } catch (e) {
+      console.error('OmniChat: Lỗi kiểm tra cập nhật:', e)
+      return { success: false, error: String(e) }
+    }
   })
 
   // ===== IPC: Restart App =====

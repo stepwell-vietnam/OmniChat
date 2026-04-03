@@ -3,9 +3,13 @@ import { ipcRenderer } from 'electron'
 // ============================================================================
 // STEPWELL OMNICHAT — Webview Preload (Optimized)
 // 1. Notification Intercept (instant new message detection)
-// 2. Avatar Scrape (periodic, 15s)
+// 2. Avatar Scrape (periodic, 15s) — PAUSED when tab hidden
 // 3. Title Observer (backup unread detection)
+// 4. DOM Scanner — PAUSED when tab hidden
 // ============================================================================
+
+// === VISIBILITY FLAG (set by App.vue via executeJavaScript) ===
+;(window as any).__omnichat_visible = true // Mặc định visible cho tab đầu tiên
 
 // === 1. NOTIFICATION INTERCEPTOR ===
 const OriginalNotification = window.Notification
@@ -170,8 +174,12 @@ window.addEventListener('load', () => {
   // Initial avatar scrape
   setTimeout(scrapeAccountInfo, 4000)
 
-  // Periodic avatar sync (every 15s)
-  setInterval(scrapeAccountInfo, 15000)
+  // Periodic avatar sync (every 15s) — CHỈ QUÉT KHI TAB ĐANG HIỆN
+  setInterval(() => {
+    if ((window as any).__omnichat_visible !== false) {
+      scrapeAccountInfo()
+    }
+  }, 15000)
 
   // Title observer — detect unread changes instantly
   let lastTitle = document.title
@@ -189,12 +197,14 @@ window.addEventListener('load', () => {
     titleObs.observe(titleEl, { childList: true, characterData: true, subtree: true })
   }
 
-  // DOM Scanner — quét DOM mỗi 3 giây để đếm unread (backup cho title observer)
+  // DOM Scanner — quét DOM mỗi 5 giây, CHỈ KHI TAB ĐANG HIỆN (tối ưu CPU)
   setTimeout(() => {
     setInterval(() => {
-      const count = scanDomForUnread()
-      reportUnread(count)
-    }, 3000)
+      if ((window as any).__omnichat_visible !== false) {
+        const count = scanDomForUnread()
+        reportUnread(count)
+      }
+    }, 5000) // Tăng từ 3s lên 5s để giảm CPU thêm
   }, 5000) // Chờ 5s cho trang load xong
 })
 
@@ -229,10 +239,14 @@ function loadSnippetsFromMainProcess() {
   } catch { /* ignore */ }
 }
 
-// Poll mỗi 3s + on load
+// Poll mỗi 5s + on load — CHỈ KHI TAB ĐANG HIỆN
 window.addEventListener('load', () => {
   setTimeout(loadSnippetsFromMainProcess, 3000)
-  setInterval(loadSnippetsFromMainProcess, 5000)
+  setInterval(() => {
+    if ((window as any).__omnichat_visible !== false) {
+      loadSnippetsFromMainProcess()
+    }
+  }, 5000)
 })
 
 // --- Lọc snippets theo ký tự đã gõ ---

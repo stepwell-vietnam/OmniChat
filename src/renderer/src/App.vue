@@ -23,6 +23,8 @@ const snippets = ref<DbQuickReply[]>([])
 const soundEnabled = ref(true)
 const notificationEnabled = ref(true)
 const autoUpdateEnabled = ref(true)
+const isCheckingUpdate = ref(false)
+const autoUpdateBannerRef = ref<InstanceType<typeof AutoUpdateBanner> | null>(null)
 const storagePath = ref('')
 
 // ===== MIGRATION =====
@@ -172,6 +174,15 @@ onMounted(async () => {
   if (visibleAccounts.value.length > 0 && !visibleAccounts.value.some(a => a.id === activeTab.value)) {
     activeTab.value = visibleAccounts.value[0].id
   }
+
+  // Sau khi webview load xong → tín hiệu pause cho các tab ẩn
+  setTimeout(() => {
+    accounts.value.forEach(acc => {
+      if (acc.id !== activeTab.value) {
+        signalWebviewVisibility(acc.id, false)
+      }
+    })
+  }, 8000) // Chờ 8s cho webview load xong rồi mới gửi tín hiệu
 })
 
 // Persist accounts + backup to JSON file
@@ -190,7 +201,6 @@ watch(accounts, async (val) => {
 // Persist settings
 watch(soundEnabled, async (val) => { await setSetting('soundEnabled', String(val)) })
 watch(notificationEnabled, async (val) => { await setSetting('notificationEnabled', String(val)) })
-watch(autoUpdateEnabled, async (val) => { await setSetting('autoUpdateEnabled', String(val)) })
 
 // Watch unread count changes -> bell icon
 watchUnreadChanges(accounts, unreadCounts, (accId: string) => {
@@ -199,10 +209,31 @@ watchUnreadChanges(accounts, unreadCounts, (accId: string) => {
 
 // ===== ACCOUNT MANAGEMENT =====
 const handleSelectTab = (id: string) => {
+  const oldTabId = activeTab.value
+
+  // Hủy Seller webview khi rời tab (Lazy-Load: giải phóng RAM)
+  if (isSellerMode.value[oldTabId]) {
+    isSellerMode.value[oldTabId] = false
+  }
+
   activeTab.value = id
   if (hasNewMessage.value[id]) {
     hasNewMessage.value = { ...hasNewMessage.value, [id]: false }
   }
+
+  // Tạm dừng scanner tab cũ, kích hoạt scanner tab mới
+  signalWebviewVisibility(oldTabId, false)
+  signalWebviewVisibility(id, true)
+}
+
+// Gửi tín hiệu pause/resume scanner tới webview
+const signalWebviewVisibility = (accId: string, visible: boolean) => {
+  try {
+    const wv = document.getElementById('webview_' + accId) as any
+    if (wv?.executeJavaScript) {
+      wv.executeJavaScript(`window.__omnichat_visible = ${visible};`)
+    }
+  } catch (e) { /* silent */ }
 }
 
 // Tính partition cho mỗi tài khoản
@@ -460,12 +491,16 @@ const handleDismissMigration = async () => {
 const handleQuitApp = () => {
   window.close()
 }
+
+const handleCheckForUpdate = () => {
+  autoUpdateBannerRef.value?.checkForUpdate()
+}
 </script>
 
 <template>
   <div class="flex flex-col h-screen w-screen bg-zalo-bg text-zalo-text overflow-hidden">
 
-    <AutoUpdateBanner :enabled="autoUpdateEnabled" />
+    <AutoUpdateBanner ref="autoUpdateBannerRef" @update:is-checking="(val) => isCheckingUpdate = val" />
 
     <MigrationBanner
       :show="showMigrationBanner"
@@ -493,7 +528,7 @@ const handleQuitApp = () => {
       <!-- Main: Webview Pool -->
       <main class="flex-1 flex flex-col bg-white relative min-w-0 z-0">
         <webview
-          v-for="acc in accounts"
+          v-for="acc in visibleAccounts"
           :id="'webview_' + acc.id"
           :key="'wv-' + acc.id"
           :src="PLATFORMS[acc.platform || 'zalo']?.url || 'https://chat.zalo.me'"
@@ -502,36 +537,34 @@ const handleQuitApp = () => {
           @ipc-message="(e: any) => handleIpcMessage(e, acc)"
           class="absolute top-0 left-0 w-full h-full flex-1 outline-none border-none bg-[#f1f2f4]"
           :style="{
-            opacity: (activeTab === acc.id && !acc.isHidden && !isSellerMode[acc.id]) ? 1 : 0.001,
-            pointerEvents: (activeTab === acc.id && !acc.isHidden && !isSellerMode[acc.id]) ? 'auto' : 'none',
-            zIndex: (activeTab === acc.id && !acc.isHidden && !isSellerMode[acc.id]) ? 10 : 0
+            opacity: (activeTab === acc.id && !isSellerMode[acc.id]) ? 1 : 0.001,
+            pointerEvents: (activeTab === acc.id && !isSellerMode[acc.id]) ? 'auto' : 'none',
+            zIndex: (activeTab === acc.id && !isSellerMode[acc.id]) ? 10 : 0
           }"
           useragent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
           allowpopups
         ></webview>
 
-        <!-- Alternate View Webviews (Seller Center / Facebook) -->
-        <webview
-          v-for="acc in accounts.filter(a => ['shopee', 'tiktok', 'messenger'].includes(a.platform || ''))"
-          :id="'webview_alt_' + acc.id"
-          :key="'wv-alt-' + acc.id"
-          :src="acc.platform === 'shopee' ? 'https://seller.shopee.vn/' : (acc.platform === 'tiktok' ? 'https://seller-vn.tiktok.com/' : 'https://www.facebook.com/')"
-          :partition="getPartition(acc)"
-          allowpopups
-          class="absolute top-0 left-0 w-full h-full flex-1 outline-none border-none bg-white"
-          :style="{
-            opacity: (activeTab === acc.id && !acc.isHidden && isSellerMode[acc.id]) ? 1 : 0.001,
-            pointerEvents: (activeTab === acc.id && !acc.isHidden && isSellerMode[acc.id]) ? 'auto' : 'none',
-            zIndex: (activeTab === acc.id && !acc.isHidden && isSellerMode[acc.id]) ? 10 : 0
-          }"
-          useragent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        ></webview>
+        <!-- Alternate View Webview (Seller Center / Facebook) — Lazy-Load: chỉ tạo khi bấm toggle -->
+        <template v-for="acc in accounts.filter(a => ['shopee', 'tiktok', 'messenger'].includes(a.platform || ''))" :key="'wv-alt-wrap-' + acc.id">
+          <webview
+            v-if="activeTab === acc.id && isSellerMode[acc.id]"
+            :id="'webview_alt_' + acc.id"
+            :key="'wv-alt-' + acc.id"
+            :src="acc.platform === 'shopee' ? 'https://seller.shopee.vn/' : (acc.platform === 'tiktok' ? 'https://seller-vn.tiktok.com/' : 'https://www.facebook.com/')"
+            :partition="getPartition(acc)"
+            allowpopups
+            class="absolute top-0 left-0 w-full h-full flex-1 outline-none border-none bg-white"
+            style="z-index: 10;"
+            useragent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+          ></webview>
+        </template>
 
         <!-- Floating Toggle Mode Button -->
         <button
           v-if="['shopee', 'tiktok', 'messenger'].includes(accounts.find(a => a.id === activeTab)?.platform || '')"
           @click="isSellerMode[activeTab] = !isSellerMode[activeTab]"
-          class="absolute top-3 right-[3.5rem] z-20 px-3 h-9 rounded-full bg-blue-600/90 hover:bg-blue-600 text-white flex items-center gap-1.5 justify-center transition-all shadow-md backdrop-blur-sm shadow-blue-500/20 hover:scale-105"
+          class="absolute top-2 left-1/2 -translate-x-[calc(50%+1.5rem)] z-20 px-3 h-9 rounded-full bg-blue-600/90 hover:bg-blue-600 text-white flex items-center gap-1.5 justify-center transition-all shadow-md backdrop-blur-sm shadow-blue-500/20 hover:scale-105"
           :title="isSellerMode[activeTab] ? 'Quay lại Chat' : (accounts.find(a => a.id === activeTab)?.platform === 'messenger' ? 'Mở Facebook' : 'Mở Kênh Người Bán')"
         >
           <!-- Giao diện nút lúc ở bên Chat -->
@@ -555,7 +588,7 @@ const handleQuitApp = () => {
         <!-- Floating Refresh Button -->
         <button
           @click="handleRefreshWebview"
-          class="absolute top-3 right-3 z-20 w-9 h-9 rounded-full bg-black/20 hover:bg-black/50 text-white flex items-center justify-center transition-all opacity-40 hover:opacity-100 backdrop-blur-sm"
+          class="absolute top-2 left-1/2 translate-x-[calc(-50%+3.5rem)] z-20 w-9 h-9 rounded-full bg-black/20 hover:bg-black/50 text-white flex items-center justify-center transition-all opacity-40 hover:opacity-100 backdrop-blur-sm"
           title="Tải lại trang (Refresh)"
         >
           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
@@ -571,7 +604,7 @@ const handleQuitApp = () => {
         :accounts="accounts"
         :sound-enabled="soundEnabled"
         :notification-enabled="notificationEnabled"
-        :auto-update-enabled="autoUpdateEnabled"
+        :is-checking-update="isCheckingUpdate"
         :storage-path="storagePath"
         :snippets="snippets"
         @close="showSettings = false"
@@ -583,7 +616,7 @@ const handleQuitApp = () => {
         @upload-avatar="handleUploadAvatar"
         @update:sound-enabled="(val) => soundEnabled = val"
         @update:notification-enabled="(val) => notificationEnabled = val"
-        @update:auto-update-enabled="(val) => autoUpdateEnabled = val"
+        @check-for-update="handleCheckForUpdate"
         @add-snippet="handleAddSnippet"
         @update-snippet="handleUpdateSnippet"
         @delete-snippet="handleDeleteSnippet"

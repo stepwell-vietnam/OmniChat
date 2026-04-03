@@ -1,11 +1,7 @@
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue'
+import { ref } from 'vue'
 
-const CURRENT_VERSION = 1.5 // Số phiên bản hiện hành
-
-const props = defineProps<{
-  enabled: boolean
-}>()
+const CURRENT_VERSION = 1.7 // Số phiên bản hiện hành
 
 const hasUpdate = ref(false)
 const updateInfo = ref({
@@ -16,8 +12,17 @@ const updateInfo = ref({
 })
 
 const isDismissed = ref(false)
+const isChecking = ref(false)
+const noUpdateFound = ref(false)
+
+const emit = defineEmits<{
+  'update:isChecking': [val: boolean]
+}>()
 
 const checkForUpdate = async () => {
+  isChecking.value = true
+  noUpdateFound.value = false
+  emit('update:isChecking', true)
   try {
     const response = await fetch('https://gitlab.com/stepwellvietnam/chatportal/-/raw/main/version.json', { cache: 'no-store' })
     if (response.ok) {
@@ -27,21 +32,24 @@ const checkForUpdate = async () => {
       if (remoteVersion > CURRENT_VERSION) {
         updateInfo.value = data
         hasUpdate.value = true
+        isDismissed.value = false
+      } else {
+        noUpdateFound.value = true
+        // Tự ẩn thông báo "đã mới nhất" sau 5 giây
+        setTimeout(() => { noUpdateFound.value = false }, 5000)
       }
     }
   } catch (error) {
-    console.log('OmniChat: Không tìm thấy bản cập nhật mới.')
+    console.log('OmniChat: Không thể kiểm tra bản cập nhật.')
+    noUpdateFound.value = true
+    setTimeout(() => { noUpdateFound.value = false }, 5000)
+  } finally {
+    isChecking.value = false
+    emit('update:isChecking', false)
   }
 }
 
-onMounted(() => {
-  if (props.enabled) checkForUpdate()
-})
-
-// Khi user bật lại setting -> kiểm tra ngay
-watch(() => props.enabled, (val) => {
-  if (val && !hasUpdate.value) checkForUpdate()
-})
+defineExpose({ checkForUpdate })
 
 const dismiss = () => {
   isDismissed.value = true
@@ -96,5 +104,17 @@ const dismiss = () => {
         <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
       </button>
     </div>
+  </div>
+
+  <!-- Đã là bản mới nhất -->
+  <div 
+    v-if="noUpdateFound && !hasUpdate"
+    class="bg-emerald-600 text-white px-4 py-2.5 flex items-center gap-2 z-50 relative drop-shadow-lg transition-all"
+  >
+    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+      <polyline points="22 4 12 14.01 9 11.01"></polyline>
+    </svg>
+    <p class="text-sm font-semibold">✅ Ứng dụng đang ở phiên bản mới nhất (V1.6)</p>
   </div>
 </template>

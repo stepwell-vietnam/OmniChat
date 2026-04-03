@@ -7,6 +7,7 @@ declare global {
       getWebviewPreloadPath: () => string
       getStoragePath: () => Promise<string>
       selectStorageFolder: () => Promise<{ success: boolean; newPath?: string; error?: string }>
+      loadStorageFolder: () => Promise<{ success: boolean; newPath?: string; error?: string }>
       restartApp: () => Promise<void>
       // Migration APIs
       getMigrationStatus: () => Promise<{
@@ -31,6 +32,7 @@ declare global {
       // Account Management
       clearPartitionData: (partition: string) => Promise<boolean>
       openSellerWindow: (partition: string, url: string) => void
+      checkForUpdate: () => Promise<{ success: boolean; data?: any; error?: string }>
     }
   }
 }

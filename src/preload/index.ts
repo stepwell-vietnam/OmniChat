@@ -10,6 +10,8 @@ const api = {
   getStoragePath: (): Promise<string> => ipcRenderer.invoke('get-storage-path'),
   selectStorageFolder: (): Promise<{ success: boolean; newPath?: string; error?: string }> =>
     ipcRenderer.invoke('select-storage-folder'),
+  loadStorageFolder: (): Promise<{ success: boolean; newPath?: string; error?: string }> =>
+    ipcRenderer.invoke('load-storage-folder'),
   restartApp: (): Promise<void> => ipcRenderer.invoke('restart-app'),
 
   // ===== Migration APIs =====
@@ -51,7 +53,11 @@ const api = {
   
   // ===== Kênh Người Bán =====
   openSellerWindow: (partition: string, url: string): void =>
-    ipcRenderer.send('open-seller-window', partition, url)
+    ipcRenderer.send('open-seller-window', partition, url),
+  
+  // ===== Kiểm tra cập nhật =====
+  checkForUpdate: (): Promise<{ success: boolean; data?: any; error?: string }> =>
+    ipcRenderer.invoke('check-for-update')
 }
 
 // Use `contextBridge` APIs to expose Electron APIs to

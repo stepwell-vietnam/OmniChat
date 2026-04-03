@@ -10,7 +10,7 @@ const props = defineProps<{
   accounts: Account[]
   soundEnabled: boolean
   notificationEnabled: boolean
-  autoUpdateEnabled: boolean
+  isCheckingUpdate?: boolean
   storagePath: string
   snippets: DbQuickReply[]
 }>()
@@ -25,7 +25,7 @@ const emit = defineEmits<{
   uploadAvatar: [id: string, data: string]
   'update:soundEnabled': [val: boolean]
   'update:notificationEnabled': [val: boolean]
-  'update:autoUpdateEnabled': [val: boolean]
+  checkForUpdate: []
   changeStoragePath: []
   restartApp: []
   addSnippet: [shortcut: string, content: string, formImages?: string[]]
@@ -112,7 +112,29 @@ const handleChangeStorage = async () => {
   }
 }
 
+const isLoadingStorage = ref(false)
+const loadStorageError = ref('')
+const loadStorageSuccess = ref(false)
 
+const handleLoadStorage = async () => {
+  isLoadingStorage.value = true
+  loadStorageError.value = ''
+  loadStorageSuccess.value = false
+  try {
+    const result = await window.api.loadStorageFolder()
+    if (result.success && result.newPath) {
+      newStoragePath.value = result.newPath
+      loadStorageSuccess.value = true
+      needsRestart.value = true
+    } else if (result.error && result.error !== 'cancelled') {
+      loadStorageError.value = result.error
+    }
+  } catch (e) {
+    loadStorageError.value = String(e)
+  } finally {
+    isLoadingStorage.value = false
+  }
+}
 
 const handleOpenSellerCenter = (acc: Account) => {
   const partition = 'persist:' + (acc.platform || 'zalo') + '_' + acc.id
@@ -125,6 +147,31 @@ const handleOpenSellerCenter = (acc: Account) => {
   
   if (url) {
     window.api.openSellerWindow(partition, url)
+  }
+}
+
+// ===== UPDATE CHECK (inline trong modal) =====
+const CURRENT_VERSION = 1.7
+const updateCheckState = ref<'idle' | 'checking' | 'up-to-date' | 'has-update' | 'error'>('idle')
+const updateData = ref({ version: '', mac_url: '', win_url: '', changelog: '' })
+
+const handleCheckUpdate = async () => {
+  updateCheckState.value = 'checking'
+  try {
+    const result = await window.api.checkForUpdate()
+    if (result.success && result.data) {
+      const remoteVersion = parseFloat(result.data.version)
+      if (remoteVersion > CURRENT_VERSION) {
+        updateData.value = result.data
+        updateCheckState.value = 'has-update'
+      } else {
+        updateCheckState.value = 'up-to-date'
+      }
+    } else {
+      updateCheckState.value = 'error'
+    }
+  } catch (e) {
+    updateCheckState.value = 'error'
   }
 }
 
@@ -429,7 +476,25 @@ const handleRemoveSnippetImage = (index: number) => {
                 </template>
                 <template v-else>
                   <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
-                  Thay đổi
+                  Chuyển nhà
+                </template>
+              </button>
+              <button
+                @click="handleLoadStorage"
+                :disabled="isLoadingStorage"
+                class="px-4 py-2.5 bg-white border border-emerald-300 rounded-lg text-sm font-semibold text-emerald-700 hover:bg-emerald-50 hover:border-emerald-500 transition flex items-center gap-1.5 flex-shrink-0 disabled:opacity-50 disabled:cursor-wait"
+                title="Kết nối tới thư mục OmniChatData đã có sẵn (ví dụ từ USB hoặc máy tính khác)"
+              >
+                <template v-if="isLoadingStorage">
+                  <svg class="animate-spin h-3.5 w-3.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  Đang kết nối...
+                </template>
+                <template v-else>
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                  Nạp dữ liệu
                 </template>
               </button>
             </div>
@@ -440,13 +505,21 @@ const handleRemoveSnippetImage = (index: number) => {
               <p class="text-sm text-red-700 flex-1">{{ migrationError }}</p>
             </div>
 
+            <!-- Load Storage Error -->
+            <div v-if="loadStorageError" class="flex items-center gap-2 bg-red-50 border border-red-200 rounded-lg p-3 mt-2 mb-2">
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-red-500 flex-shrink-0"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg>
+              <p class="text-sm text-red-700 flex-1">{{ loadStorageError }}</p>
+            </div>
+
             <!-- Restart Banner -->
             <div v-if="needsRestart" class="flex flex-col gap-2 bg-emerald-50 border border-emerald-200 rounded-lg p-4 mt-2">
               <div class="flex items-center gap-2">
                 <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-emerald-600 flex-shrink-0"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
-                <p class="text-sm font-bold text-emerald-800">✅ Đã chuyển phiên đăng nhập thành công!</p>
+                <p v-if="loadStorageSuccess" class="text-sm font-bold text-emerald-800">✅ Đã kết nối dữ liệu thành công!</p>
+                <p v-else class="text-sm font-bold text-emerald-800">✅ Đã chuyển phiên đăng nhập thành công!</p>
               </div>
-              <p class="text-xs text-emerald-700 ml-7">Phiên đăng nhập Zalo đã được sao chép sang thư mục mới. Tin nhắn cũ sẽ được Zalo tự động đồng bộ lại sau khi khởi động.</p>
+              <p v-if="loadStorageSuccess" class="text-xs text-emerald-700 ml-7">Ứng dụng sẽ sử dụng dữ liệu từ thư mục đã chọn. Vui lòng khởi động lại để áp dụng.</p>
+              <p v-else class="text-xs text-emerald-700 ml-7">Phiên đăng nhập Zalo đã được sao chép sang thư mục mới. Tin nhắn cũ sẽ được Zalo tự động đồng bộ lại sau khi khởi động.</p>
               <div class="ml-7 mt-1">
                 <button
                   @click="handleRestart"
@@ -507,22 +580,60 @@ const handleRemoveSnippetImage = (index: number) => {
 
               <div class="border-t border-gray-100"></div>
 
-              <!-- Toggle: Tự động kiểm tra cập nhật -->
-              <div class="flex items-center justify-between">
-                <div>
-                  <p class="text-sm font-semibold text-gray-700">Tự động kiểm tra cập nhật</p>
-                  <p class="text-xs text-gray-400 mt-0.5">Khi bật, ứng dụng sẽ tự động kiểm tra phiên bản mới mỗi khi khởi động</p>
+              <!-- Kiểm tra cập nhật thủ công -->
+              <div class="space-y-3">
+                <div class="flex items-center justify-between">
+                  <div>
+                    <p class="text-sm font-semibold text-gray-700">Phiên bản ứng dụng</p>
+                    <p class="text-xs text-gray-400 mt-0.5">Đang sử dụng phiên bản <span class="font-bold text-gray-600">V1.7</span></p>
+                  </div>
+                  <button
+                    @click="handleCheckUpdate"
+                    :disabled="updateCheckState === 'checking'"
+                    class="px-4 py-2 bg-blue-50 border border-blue-200 rounded-lg text-sm font-semibold text-blue-600 hover:bg-blue-100 hover:border-blue-400 transition flex items-center gap-1.5 flex-shrink-0 disabled:opacity-50 disabled:cursor-wait"
+                  >
+                    <svg 
+                      xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"
+                      :class="updateCheckState === 'checking' ? 'animate-spin' : ''"
+                    >
+                      <polyline points="23 4 23 10 17 10"></polyline>
+                      <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+                    </svg>
+                    <span v-if="updateCheckState === 'checking'">Đang kiểm tra...</span>
+                    <span v-else>Kiểm tra cập nhật</span>
+                  </button>
                 </div>
-                <button
-                  @click="emit('update:autoUpdateEnabled', !autoUpdateEnabled)"
-                  class="relative w-12 h-7 rounded-full transition-colors duration-200 focus:outline-none flex-shrink-0"
-                  :class="autoUpdateEnabled ? 'bg-zalo-primary' : 'bg-gray-300'"
-                >
-                  <span
-                    class="absolute top-0.5 left-0.5 w-6 h-6 bg-white rounded-full shadow-md transition-transform duration-200"
-                    :class="autoUpdateEnabled ? 'translate-x-5' : 'translate-x-0'"
-                  ></span>
-                </button>
+
+                <!-- Kết quả: Đã mới nhất -->
+                <div v-if="updateCheckState === 'up-to-date'" class="flex items-center gap-2 bg-emerald-50 border border-emerald-200 rounded-lg p-3 transition-all">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="text-emerald-600 flex-shrink-0">
+                    <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                    <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                  </svg>
+                  <p class="text-sm font-semibold text-emerald-700">✅ Ứng dụng đang ở phiên bản mới nhất!</p>
+                </div>
+
+                <!-- Kết quả: Có bản mới -->
+                <div v-if="updateCheckState === 'has-update'" class="bg-blue-50 border border-blue-200 rounded-lg p-4 space-y-2 transition-all">
+                  <p class="text-sm font-bold text-blue-800">🎉 Đã có phiên bản mới: <span class="text-blue-600">v{{ updateData.version }}</span></p>
+                  <p v-if="updateData.changelog" class="text-xs text-blue-600">{{ updateData.changelog }}</p>
+                  <div class="flex gap-2 mt-2">
+                    <a v-if="updateData.win_url" :href="updateData.win_url" target="_blank" class="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-bold hover:bg-blue-700 transition flex items-center gap-1">
+                      <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
+                      Tải Windows
+                    </a>
+                    <a v-if="updateData.mac_url" :href="updateData.mac_url" target="_blank" class="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-bold hover:bg-blue-700 transition flex items-center gap-1">
+                      <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20.94c1.5 0 2.75 1.06 4 1.06 3 0 6-8 6-12.22A4.91 4.91 0 0 0 17 5c-2.22 0-4 1.44-5 2-1-.56-2.78-2-5-2a4.9 4.9 0 0 0-5 4.78C2 14 5 22 8 22c1.25 0 2.5-1.06 4-1.06Z"></path><path d="M10 2c1 .5 2 2 2 5"></path></svg>
+                      Tải Macbook
+                    </a>
+                  </div>
+                </div>
+
+                <!-- Kết quả: Lỗi -->
+                <div v-if="updateCheckState === 'error'" class="flex items-center gap-2 bg-red-50 border border-red-200 rounded-lg p-3">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-red-500 flex-shrink-0"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg>
+                  <p class="text-sm text-red-700">Không thể kết nối tới máy chủ cập nhật. Vui lòng thử lại.</p>
+                </div>
               </div>
             </div>
           </div>
