@@ -218,9 +218,32 @@ app.whenReady().then(() => {
       // Bỏ qua lỗi nếu session chưa sẵn sàng
     }
 
+    contents.on('did-create-window', (window) => {
+      // Bắt sự kiện khi cửa sổ popup (vd: about:blank) vừa được tạo
+      // Ngay khi Zalo Web cố gắng điều hướng cửa sổ này tới link thật, ta sẽ bắt lại và đẩy ra trình duyệt ngoài
+      window.webContents.on('will-navigate', (e, url) => {
+        e.preventDefault()
+        const parsedUrl = new URL(url)
+        if (parsedUrl.protocol === 'http:' || parsedUrl.protocol === 'https:') {
+          shell.openExternal(url)
+        }
+        window.close() // Đóng ngay cửa sổ tạm
+      })
+    })
+
     contents.setWindowOpenHandler((details) => {
       try {
         const url = new URL(details.url)
+
+        // Cho phép about:blank (Zalo Web thường dùng about:blank làm bước đệm để mở link)
+        if (details.url === 'about:blank') {
+          return {
+            action: 'allow',
+            overrideBrowserWindowOptions: {
+              show: false // Ẩn cửa sổ này đi để không bị chớp nháy trên màn hình
+            }
+          }
+        }
 
         // Chặn triệt để protocol lạ (bytedance://, tiktok://, v.v.) — KHÔNG cho hệ điều hành xử lý
         if (url.protocol !== 'http:' && url.protocol !== 'https:') {

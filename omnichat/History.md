@@ -17,3 +17,4 @@ Phase 1:
   + Tài khoản đã ẩn = tắt hẳn webview, không tốn tài nguyên
   + Kiểm tra cập nhật thủ công trong Settings (không còn tự động gọi API)
   + Tính năng Nạp dữ liệu: load profile từ USB/máy khác mà không cần copy
+- [V1.8] Cập nhật giao diện ứng dụng, tối ưu màn hình cài đặt (SettingsModal) và nâng cấp hệ thống thông báo (useNotifications)

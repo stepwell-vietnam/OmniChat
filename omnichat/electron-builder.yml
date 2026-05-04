@@ -4,19 +4,25 @@ icon: build/icon.png
 directories:
   buildResources: build
 files:
-  - '!**/.vscode/*'
-  - '!src/*'
+  - '!**/.vscode/**'
+  - '!src/**'
+  - '!**/.npm-cache/**'
+  - '!**/.git/**'
   - '!electron.vite.config.{js,ts,mjs,cjs}'
   - '!{.eslintcache,eslint.config.mjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md,README.md}'
-  - '!{.env,.env.*,.npmrc,pnpm-lock.yaml}'
+  - '!{.env,.env.*,.npmrc,pnpm-lock.yaml,package-lock.json}'
   - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
+  - '!{prd_stepwell_omnichat.md,History.md,.editorconfig,.gitignore}'
+  - '!{restart.bat,start.command,version.json,Stepwell_Chat_icon.png}'
+  - '!pnpm-workspace.yaml'
+  - '!build/create-ico.js'
 asarUnpack:
   - resources/**
 win:
   executableName: StepwellOmniChat
   icon: build/icon.ico
 nsis:
-  artifactName: OmniChat_V1.6.${ext}
+  artifactName: OmniChat_V1.7.${ext}
   shortcutName: ${productName}
   uninstallDisplayName: ${productName}
   createDesktopShortcut: always
@@ -29,7 +35,7 @@ mac:
     - NSDownloadsFolderUsageDescription: Application requests access to the user's Downloads folder.
   notarize: false
 dmg:
-  artifactName: OmniChat_V1.6.${ext}
+  artifactName: OmniChat_V1.7.${ext}
 linux:
   target:
     - AppImage
