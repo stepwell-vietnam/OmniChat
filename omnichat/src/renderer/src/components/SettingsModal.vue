@@ -38,7 +38,7 @@ const showFanpagePicker = ref(false)
 
 // Nhóm tài khoản theo nền tảng
 const groupedAccounts = computed(() => {
-  const platformOrder: Platform[] = ['zalo', 'messenger', 'fanpage', 'whatsapp', 'shopee', 'tiktok']
+  const platformOrder: Platform[] = ['zalo', 'messenger', 'fanpage', 'whatsapp', 'telegram', 'shopee', 'tiktok']
   const groups: { platform: Platform; label: string; accounts: Account[] }[] = []
   for (const p of platformOrder) {
     const accs = props.accounts.filter(a => (a.platform || 'zalo') === p)
@@ -151,7 +151,7 @@ const handleOpenSellerCenter = (acc: Account) => {
 }
 
 // ===== UPDATE CHECK (inline trong modal) =====
-const CURRENT_VERSION = 1.7
+const CURRENT_VERSION = 1.81
 const updateCheckState = ref<'idle' | 'checking' | 'up-to-date' | 'has-update' | 'error'>('idle')
 const updateData = ref({ version: '', mac_url: '', win_url: '', changelog: '' })
 
@@ -393,6 +393,10 @@ const handleRemoveSnippetImage = (index: number) => {
               <span class="w-6 h-6 bg-purple-600 text-white rounded-full flex items-center justify-center text-xs font-bold">M</span>
               Messenger
             </button>
+            <button @click="emit('addAccount', 'telegram')" class="py-3 border-2 border-dashed border-blue-200 rounded-lg text-blue-500 font-bold hover:border-blue-400 hover:bg-blue-50 transition flex justify-center items-center gap-2 focus:outline-none">
+              <span class="w-6 h-6 bg-blue-400 text-white rounded-full flex items-center justify-center text-xs font-bold">Tg</span>
+              Telegram
+            </button>
             <button @click="emit('addAccount', 'shopee')" class="py-3 border-2 border-dashed border-orange-200 rounded-lg text-orange-500 font-bold hover:border-orange-500 hover:bg-orange-50 transition flex justify-center items-center gap-2 focus:outline-none">
               <span class="w-6 h-6 bg-orange-500 text-white rounded-full flex items-center justify-center text-xs font-bold">S</span>
               Shopee
@@ -401,7 +405,7 @@ const handleRemoveSnippetImage = (index: number) => {
               <span class="w-6 h-6 bg-black text-white rounded-full flex items-center justify-center text-xs font-bold">T</span>
               TikTok
             </button>
-            <button @click="handleFanpageClick" class="py-3 border-2 border-dashed border-blue-300 rounded-lg text-blue-800 font-bold hover:border-blue-800 hover:bg-blue-50 transition flex justify-center items-center gap-2 focus:outline-none">
+            <button @click="handleFanpageClick" class="col-span-3 py-3 border-2 border-dashed border-blue-300 rounded-lg text-blue-800 font-bold hover:border-blue-800 hover:bg-blue-50 transition flex justify-center items-center gap-2 focus:outline-none">
               <span class="w-6 h-6 bg-blue-800 text-white rounded-full flex items-center justify-center text-xs font-bold">F</span>
               Fanpage
             </button>
@@ -585,7 +589,7 @@ const handleRemoveSnippetImage = (index: number) => {
                 <div class="flex items-center justify-between">
                   <div>
                     <p class="text-sm font-semibold text-gray-700">Phiên bản ứng dụng</p>
-                    <p class="text-xs text-gray-400 mt-0.5">Đang sử dụng phiên bản <span class="font-bold text-gray-600">V1.7</span></p>
+                    <p class="text-xs text-gray-400 mt-0.5">Đang sử dụng phiên bản <span class="font-bold text-gray-600">V1.8.1</span></p>
                   </div>
                   <button
                     @click="handleCheckUpdate"

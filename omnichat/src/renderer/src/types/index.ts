@@ -1,6 +1,6 @@
 // ===== STEPWELL OMNICHAT — TYPE DEFINITIONS =====
 
-export type Platform = 'zalo' | 'whatsapp' | 'messenger' | 'shopee' | 'tiktok' | 'fanpage'
+export type Platform = 'zalo' | 'whatsapp' | 'messenger' | 'shopee' | 'tiktok' | 'fanpage' | 'telegram'
 
 /** Platform configuration */
 export const PLATFORMS: Record<Platform, { name: string; url: string; color: string; icon: string }> = {
@@ -9,7 +9,8 @@ export const PLATFORMS: Record<Platform, { name: string; url: string; color: str
   messenger: { name: 'Messenger', url: 'https://www.messenger.com', color: 'bg-purple-600', icon: 'M' },
   shopee: { name: 'Shopee', url: 'https://seller.shopee.vn/webchat', color: 'bg-orange-500', icon: 'S' },
   tiktok: { name: 'TikTok', url: 'https://seller-vn.tiktok.com/chat/', color: 'bg-black', icon: 'T' },
-  fanpage: { name: 'Fanpage', url: 'https://business.facebook.com/latest/inbox/', color: 'bg-blue-800', icon: 'F' }
+  fanpage: { name: 'Fanpage', url: 'https://business.facebook.com/latest/inbox/', color: 'bg-blue-800', icon: 'F' },
+  telegram: { name: 'Telegram', url: 'https://web.telegram.org/k/', color: 'bg-blue-400', icon: 'Tg' }
 }
 
 /** Account in the system */
